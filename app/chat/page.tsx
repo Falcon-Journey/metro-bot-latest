@@ -20,6 +20,14 @@ type Message = {
   content: string
 }
 
+function normalizeText(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[.,!?…]/g, "") // remove punctuation
+    .replace(/\s+/g, " ")     // collapse spaces
+    .trim()
+}
+
 function MessageList({ messages, loading }: { messages: Message[]; loading?: boolean }) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, loading])
@@ -273,9 +281,10 @@ const send = async (text: string) => {
     setMessages((m) => [...m, { id: msgId, role: "assistant", content: "" }]);
 
     // Check if the response contains a trigger phrase
+    const normalizedText = normalizeText(fullText)
     const containsTrigger = triggerPhrases.some((phrase) =>
-      fullText.toLowerCase().includes(phrase)
-    );
+      normalizedText.includes(normalizeText(phrase))
+    )
 
     if (containsTrigger) {
       // Send follow-up question
@@ -301,13 +310,18 @@ const send = async (text: string) => {
 
     // Gradually reveal text
     let index = 0;
+    const step = 5;        // reveal 5 chars per frame
+    const delay = 10;      // every 10 ms
+
     const interval = setInterval(() => {
-      index += 1;
+      index += step;
       setMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, content: fullText.slice(0, index) } : m))
+        prev.map((m) =>
+          m.id === msgId ? { ...m, content: fullText.slice(0, index) } : m
+        )
       );
       if (index >= fullText.length) clearInterval(interval);
-    }, 20);
+    }, delay);
 
   } catch (e: any) {
     const assistantMsg: Message = {
