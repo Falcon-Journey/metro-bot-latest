@@ -268,96 +268,68 @@ export default function ChatPage() {
     setLoading(true)
 
     const msgId = `${Date.now()}-a`
+    setMessages((m) => [...m, { id: msgId, role: "assistant", content: "" }])
 
-try {
-  const payload = hasSentFirstMessage || !invisibleContext ? text : `${invisibleContext}\n\n${text}`
-  const res = await fetch("/api/bedrock-agent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ input: payload, sessionId, mode }),
-  })
 
-  if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let fullText = ""
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    const chunk = decoder.decode(value, { stream: true })
-    fullText += chunk
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
-    )
-  }
+    try {
+      const payload = hasSentFirstMessage || !invisibleContext ? text : `${invisibleContext}\n\n${text}`
+      const res = await fetch("/api/bedrock-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: payload, sessionId, mode }),
+      })
 
-  fullText = sanitizeAssistantOutput(fullText)
-  const normalizedText = normalizeText(fullText)
-  const containsTrigger = triggerPhrases.some((phrase) =>
-    normalizedText.includes(normalizeText(phrase)),
-  )
+      if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let fullText = ""
 
-  // ✅ Fix: show the agent’s original message first
-  setMessages((prev) =>
-    prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
-  )
-
-  // ✅ Then send the follow-up as a new message
-  if (containsTrigger) {
-    const followUpUserMsg: Message = {
-      id: `${Date.now()}-trigger-q`,
-      role: "user",
-      content: "What is the estimated price for this trip?",
-    }
-    setMessages((prev) => [...prev, followUpUserMsg])
-
-    const followUpRes = await fetch("/api/bedrock-agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: "What is the estimated price for this trip?",
-        sessionId,
-        mode,
-      }),
-    })
-
-    if (followUpRes.ok) {
-      const followUpReader = followUpRes.body?.getReader()
-      const followUpDecoder = new TextDecoder()
-      let followUpText = ""
-
-      const followUpMsgId = `${Date.now()}-a-followup`
-      setMessages((prev) => [...prev, { id: followUpMsgId, role: "assistant", content: "" }])
-
-      while (followUpReader) {
-        const { done, value } = await followUpReader.read()
+      while (true) {
+        const { done, value } = await reader.read()
         if (done) break
-        const chunk = followUpDecoder.decode(value, { stream: true })
-        followUpText += chunk
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === followUpMsgId ? { ...m, content: sanitizeAssistantOutput(followUpText) } : m,
-          ),
-        )
+        const chunk = decoder.decode(value, { stream: true })
+        fullText += chunk
+        setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)))
       }
-    }
-  }
-} catch (e) {
-  console.error("❌ Chat error:", e)
-  setMessages((m) => [
-    ...m,
-    {
-      id: `${Date.now()}-e`,
-      role: "assistant",
-      content: "Sorry, I couldn’t reach the agent. Verify env vars and AWS configuration.",
-    },
-  ])
-} finally {
-  setLoading(false)
-  if (!hasSentFirstMessage) setHasSentFirstMessage(true)
-}
 
+      fullText = sanitizeAssistantOutput(fullText)
+      const normalizedText = normalizeText(fullText)
+      const containsTrigger = triggerPhrases.some((phrase) =>
+        normalizedText.includes(normalizeText(phrase)),
+      )
+
+      if (containsTrigger) {
+        const followUpRes = await fetch("/api/bedrock-agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: "What is the estimated price for this trip?",
+            sessionId,
+            mode,
+          }),
+        })
+        if (followUpRes.ok) {
+          const followUpData = await followUpRes.text()
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msgId ? { ...m, content: sanitizeAssistantOutput(followUpData) } : m)),
+          )
+        }
+      }
+    } catch (e) {
+      console.error("❌ Chat error:", e)
+      setMessages((m) => [
+        ...m,
+        {
+          id: `${Date.now()}-e`,
+          role: "assistant",
+          content: "Sorry, I couldn’t reach the agent. Verify env vars and AWS configuration.",
+        },
+      ])
+    } finally {
+      setLoading(false)
+      if (!hasSentFirstMessage) setHasSentFirstMessage(true)
+    }
   }
 
   return (
