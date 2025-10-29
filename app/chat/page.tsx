@@ -255,86 +255,102 @@ export default function ChatPage() {
   }, [])
 
   const triggerPhrases = [
-    "let me look for pricing for similar trips",
-    "our sales team will contact you soon to confirm final details",
-    "checking pricing for similar trips",
-    "finding price estimates",
-  ]
+  "let me look for pricing for similar trips",
+  "our sales team will contact you soon to confirm final details",
+  "checking pricing for similar trips",
+  "finding price estimates",
+]
 
-  const send = async (text: string) => {
-    if (loading) return
-    const userMsg: Message = { id: `${Date.now()}-u`, role: "user", content: text }
-    setMessages((m) => [...m, userMsg])
-    setLoading(true)
+const send = async (text: string) => {
+  if (loading) return
+  const userMsg: Message = { id: `${Date.now()}-u`, role: "user", content: text }
+  setMessages((m) => [...m, userMsg])
+  setLoading(true)
 
-    const msgId = `${Date.now()}-a`
+  const msgId = `${Date.now()}-a`
 
-    try {
-      const payload = hasSentFirstMessage || !invisibleContext ? text : `${invisibleContext}\n\n${text}`
-      const res = await fetch("/api/bedrock-agent", {
+  try {
+    const payload =
+      hasSentFirstMessage || !invisibleContext
+        ? text
+        : `${invisibleContext}\n\n${text}`
+
+    const res = await fetch("/api/bedrock-agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: payload, sessionId, mode }),
+    })
+
+    if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value, { stream: true })
+      fullText += chunk
+      setMessages((prev) => {
+        const hasMsg = prev.some((m) => m.id === msgId)
+        if (!hasMsg) {
+          return [...prev, { id: msgId, role: "assistant", content: chunk }]
+        }
+        return prev.map((m) =>
+          m.id === msgId ? { ...m, content: fullText } : m,
+        )
+      })
+    }
+
+    // ✅ Step 1: finalize and show the assistant message
+    fullText = sanitizeAssistantOutput(fullText)
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
+    )
+
+    // ✅ Step 2: then check for triggers AFTER the main message is shown
+    const normalizedText = normalizeText(fullText)
+    const containsTrigger = triggerPhrases.some((phrase) =>
+      normalizedText.includes(normalizeText(phrase)),
+    )
+
+    if (containsTrigger) {
+      const followUpRes = await fetch("/api/bedrock-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: payload, sessionId, mode }),
+        body: JSON.stringify({
+          input: "What is the estimated price for this trip?",
+          sessionId,
+          mode,
+        }),
       })
 
-      if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let fullText = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        fullText += chunk
-  setMessages((prev) => {
-    const hasMsg = prev.some((m) => m.id === msgId)
-    if (!hasMsg) {
-      return [...prev, { id: msgId, role: "assistant", content: chunk }]
-    }
-    return prev.map((m) =>
-      m.id === msgId ? { ...m, content: fullText } : m,
-    )
-  })      }
-
-      fullText = sanitizeAssistantOutput(fullText)
-      const normalizedText = normalizeText(fullText)
-      const containsTrigger = triggerPhrases.some((phrase) =>
-        normalizedText.includes(normalizeText(phrase)),
-      )
-
-      if (containsTrigger) {
-        const followUpRes = await fetch("/api/bedrock-agent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            input: "What is the estimated price for this trip?",
-            sessionId,
-            mode,
-          }),
-        })
-        if (followUpRes.ok) {
-          const followUpData = await followUpRes.text()
-          setMessages((prev) =>
-            prev.map((m) => (m.id === msgId ? { ...m, content: sanitizeAssistantOutput(followUpData) } : m)),
-          )
-        }
+      if (followUpRes.ok) {
+        const followUpData = sanitizeAssistantOutput(await followUpRes.text())
+        // ✅ Append follow-up as a NEW message instead of replacing the original
+        setMessages((prev) => [
+          ...prev,
+          { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
+        ])
       }
-    } catch (e) {
-      console.error("❌ Chat error:", e)
-      setMessages((m) => [
-        ...m,
-        {
-          id: `${Date.now()}-e`,
-          role: "assistant",
-          content: "Sorry, I couldn’t reach the agent. Verify env vars and AWS configuration.",
-        },
-      ])
-    } finally {
-      setLoading(false)
-      if (!hasSentFirstMessage) setHasSentFirstMessage(true)
     }
+  } catch (e) {
+    console.error("❌ Chat error:", e)
+    setMessages((m) => [
+      ...m,
+      {
+        id: `${Date.now()}-e`,
+        role: "assistant",
+        content:
+          "Sorry, I couldn’t reach the agent. Verify env vars and AWS configuration.",
+      },
+    ])
+  } finally {
+    setLoading(false)
+    if (!hasSentFirstMessage) setHasSentFirstMessage(true)
   }
+}
+
 
   return (
     <main className="flex h-[100dvh] flex-col">
