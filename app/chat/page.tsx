@@ -268,9 +268,6 @@ export default function ChatPage() {
     setLoading(true)
 
     const msgId = `${Date.now()}-a`
-    setMessages((m) => [...m, { id: msgId, role: "assistant", content: "" }])
-
-
 
     try {
       const payload = hasSentFirstMessage || !invisibleContext ? text : `${invisibleContext}\n\n${text}`
@@ -290,8 +287,15 @@ export default function ChatPage() {
         if (done) break
         const chunk = decoder.decode(value, { stream: true })
         fullText += chunk
-        setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)))
-      }
+  setMessages((prev) => {
+    const hasMsg = prev.some((m) => m.id === msgId)
+    if (!hasMsg) {
+      return [...prev, { id: msgId, role: "assistant", content: chunk }]
+    }
+    return prev.map((m) =>
+      m.id === msgId ? { ...m, content: fullText } : m,
+    )
+  })      }
 
       fullText = sanitizeAssistantOutput(fullText)
       const normalizedText = normalizeText(fullText)
