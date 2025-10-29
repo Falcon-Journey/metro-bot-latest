@@ -209,8 +209,8 @@ function QuickSuggestions({
 }) {
   const suggestions =
     mode === "booking"
-      ? ["Book a ride from DC to NYC this Friday", "What is your payment policy?"]
-      : ["What is price for Newyork to DC trip", "Who arranges and pays for the driver’s hotel room?"]
+      ? ["Book a ride from DC to NYC this Friday", "NYC to DC on Friday for 15 people one way leaving at 9am from the union station and arrive at 2pm at penn station"]
+      : ["What’s the price for a one-way trip from NYC to DC for 15 people?", "Who arranges and pays for the driver’s hotel room?"]
 
   return (
     <div className="w-full">
