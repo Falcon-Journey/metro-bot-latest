@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server"
 import {
+  BedrockAgentClient,
+  GetAgentCommand,
+} from "@aws-sdk/client-bedrock-agent"
+import {
   BedrockClient,
-  BedrockClientConfig,
-  ListGuardrailsCommand,
+  GetGuardrailCommand,
 } from "@aws-sdk/client-bedrock"
 
 export const dynamic = "force-dynamic"
@@ -13,48 +16,94 @@ export async function GET() {
     const agentIdsEnv = process.env.BEDROCK_AGENT_IDS
     const agentVersionsEnv = process.env.BEDROCK_AGENT_VERSIONS
 
-    if (!agentIdsEnv) throw new Error("Missing BEDROCK_AGENT_IDS in environment variables")
-    if (!agentVersionsEnv) throw new Error("Missing BEDROCK_AGENT_VERSIONS in environment variables")
+    if (!agentIdsEnv)
+      throw new Error("Missing BEDROCK_AGENT_IDS in environment variables")
 
     const agentIds = agentIdsEnv.split(",").map((id) => id.trim())
-    const agentVersions = agentVersionsEnv.split(",").map((v) => v.trim())
+    const agentVersions = agentVersionsEnv
+      ? agentVersionsEnv.split(",").map((v) => v.trim())
+      : []
 
-    if (agentIds.length !== agentVersions.length) {
-      throw new Error("BEDROCK_AGENT_IDS and BEDROCK_AGENT_VERSIONS length mismatch")
-    }
+    const agentClient = new BedrockAgentClient({ region })
+    const bedrockClient = new BedrockClient({ region })
 
-    // ✅ Use BedrockClient for Guardrails
-    const config: BedrockClientConfig = { region }
-    const client = new BedrockClient(config)
+    console.log(`🔍 Fetching guardrails for agents: ${agentIds.join(", ")}`)
 
-    // Fetch all guardrails in the account
-    const command = new ListGuardrailsCommand({})
-    const response = await client.send(command)
+    // 🧠 Fetch all agents in parallel
+    const results = await Promise.all(
+      agentIds.map(async (agentId, index) => {
+        try {
+          const version =
+            agentVersions[index] || "DRAFT" // fallback if not provided
 
-    const allGuardrails =
-      response.guardrails?.map((gr) => ({
-        id: gr.id,
-        name: gr.name || "Unnamed Guardrail",
-        description: gr.description || "",
-        status: gr.status?.toLowerCase() || "unknown",
-        version: gr.version || "N/A",
-        lastModified: gr.updatedAt
-          ? new Date(gr.updatedAt).toLocaleString()
-          : "N/A",
-      })) || []
+          console.log(`➡️ Fetching agent ${agentId} (version: ${version})`)
+          const agentResp = await agentClient.send(
+            new GetAgentCommand({
+              agentId,
+            })
+          )
 
-    // ✅ Optional: Filter by agent ID if your naming scheme uses agent identifiers
-    const filteredGuardrails = allGuardrails.filter((gr) =>
-      agentIds.some((id) =>
-        gr.name?.toLowerCase().includes(id.toLowerCase())
-      )
+          const guardrailConfig = agentResp.agent?.guardrailConfiguration
+          if (!guardrailConfig?.guardrailIdentifier) {
+            console.warn(`⚠️ No guardrail linked to agent ${agentId}`)
+            return null
+          }
+
+          console.log(
+            `🔗 Agent ${agentId} linked to guardrail ${guardrailConfig.guardrailIdentifier} (v${guardrailConfig.guardrailVersion})`
+          )
+
+          // Fetch guardrail details
+          const guardrailResp = await bedrockClient.send(
+            new GetGuardrailCommand({
+              guardrailIdentifier: guardrailConfig.guardrailIdentifier,
+              guardrailVersion: guardrailConfig.guardrailVersion,
+            })
+          )
+
+          return {
+            id: guardrailResp.guardrailId,
+            name: guardrailResp.name || "Unnamed Guardrail",
+            description: guardrailResp.description || "No description provided.",
+            version: guardrailResp.version || guardrailConfig.guardrailVersion,
+            status: guardrailResp.status || "UNKNOWN",
+            updatedAt: guardrailResp.updatedAt
+              ? new Date(guardrailResp.updatedAt).toISOString()
+              : null,
+            linkedAgent: {
+              id: agentId,
+              version,
+            },
+          }
+        } catch (err: any) {
+          console.error(`❌ Error fetching guardrail for agent ${agentId}:`, err)
+          return {
+            id: null,
+            name: `Error loading guardrail for agent ${agentId}`,
+            description: err.message || "Unknown error",
+            status: "ERROR",
+            version: null,
+            linkedAgent: {
+              id: agentId,
+              version: agentVersions[index] || "DRAFT",
+            },
+          }
+        }
+      })
     )
 
-    return NextResponse.json(filteredGuardrails.length ? filteredGuardrails : allGuardrails)
+    // Filter out nulls (agents without guardrails)
+    const validGuardrails = results.filter(Boolean)
+
+    if (validGuardrails.length === 0) {
+      return NextResponse.json([], { status: 200 })
+    }
+
+    return NextResponse.json(validGuardrails, { status: 200 })
   } catch (err: any) {
-    console.error("❌ Error fetching Bedrock Guardrails:", err)
+    console.error("❌ Error fetching multiple guardrails:", err)
     return NextResponse.json(
-      { error: "Failed to fetch Bedrock Guardrails", details: err.message },
+      { error: "Failed to fetch guardrails", details: err.message },
       { status: 500 }
     )
   }
