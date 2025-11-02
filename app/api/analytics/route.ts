@@ -10,10 +10,29 @@ export const dynamic = "force-dynamic"
 const region = process.env.AWS_REGION || "us-west-2"
 const cw = new CloudWatchClient({ region })
 
-async function queryMetrics(): Promise<any> {
+async function queryMetrics(range: string): Promise<any> {
   const now = Date.now()
-const start = now - 30 * 24 * 60 * 60 * 1000 // last 30 days
-  const end = now
+  let start: number
+  let period: number // seconds per datapoint
+
+  // 🕒 Adjust query window & granularity
+  switch (range) {
+    case "day":
+      start = now - 24 * 60 * 60 * 1000 // 1 day
+      period = 300 // 5 min resolution
+      break
+    case "week":
+      start = now - 7 * 24 * 60 * 60 * 1000 // 7 days
+      period = 3600 // 1 hour
+      break
+    case "month":
+      start = now - 30 * 24 * 60 * 60 * 1000 // 30 days
+      period = 6 * 3600 // 6 hours
+      break
+    default:
+      start = now - 30 * 24 * 60 * 60 * 1000
+      period = 3600
+  }
 
   const metrics: MetricDataQuery[] = [
     {
@@ -23,7 +42,7 @@ const start = now - 30 * 24 * 60 * 60 * 1000 // last 30 days
           Namespace: "AWS/Bedrock",
           MetricName: "Invocations",
         },
-        Period: 60,
+        Period: period,
         Stat: "Sum",
       },
       ReturnData: true,
@@ -35,7 +54,7 @@ const start = now - 30 * 24 * 60 * 60 * 1000 // last 30 days
           Namespace: "AWS/Bedrock",
           MetricName: "InputTokenCount",
         },
-        Period: 60,
+        Period: period,
         Stat: "Sum",
       },
       ReturnData: true,
@@ -47,7 +66,7 @@ const start = now - 30 * 24 * 60 * 60 * 1000 // last 30 days
           Namespace: "AWS/Bedrock",
           MetricName: "OutputTokenCount",
         },
-        Period: 60,
+        Period: period,
         Stat: "Sum",
       },
       ReturnData: true,
@@ -59,62 +78,81 @@ const start = now - 30 * 24 * 60 * 60 * 1000 // last 30 days
           Namespace: "AWS/Bedrock",
           MetricName: "InvocationLatency",
         },
-        Period: 60,
+        Period: period,
         Stat: "Average",
       },
       ReturnData: true,
     },
   ]
 
-  console.log("🔍 Querying CloudWatch metrics", {
+  console.log("🔍 Querying CloudWatch", {
+    range,
     region,
     start: new Date(start).toISOString(),
-    end: new Date(end).toISOString(),
-    metrics: metrics.map((m) => m.Id),
+    end: new Date(now).toISOString(),
+    period,
   })
 
   const cmd = new GetMetricDataCommand({
     StartTime: new Date(start),
-    EndTime: new Date(end),
+    EndTime: new Date(now),
     MetricDataQueries: metrics,
   })
 
   const resp = await cw.send(cmd)
-  console.log("📊 Raw CloudWatch response:", JSON.stringify(resp, null, 2))
-
   return resp
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     console.log("🚀 Analytics API triggered")
 
-    const data = await queryMetrics()
+    const url = new URL(req.url)
+    const range = url.searchParams.get("range") || "month"
+
+    const data = await queryMetrics(range)
 
     const result: any = {
-      invocations: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      avgLatency: 0,
+      summary: {
+        invocations: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        avgLatency: 0,
+      },
+      history: [],
     }
 
+    const timeStamps: Record<string, string[]> = {}
+
     for (const m of data.MetricDataResults || []) {
-      const { Id, Values, Label } = m
-      const sum = (Values || []).reduce((a: number, b: number) => a + b, 0)
+      const { Id, Values = [], Timestamps = [] } = m
+      const sum = Values.reduce((a:any, b:any) => a + b, 0)
 
-      console.log(`🧮 Metric: ${Label || Id} | Points: ${Values?.length || 0} | Sum: ${sum}`)
-
-      if (Id === "invocations") result.invocations = sum
-      if (Id === "inputTokens") result.inputTokens = sum
-      if (Id === "outputTokens") result.outputTokens = sum
+      if (Id === "invocations") result.summary.invocations = sum
+      if (Id === "inputTokens") result.summary.inputTokens = sum
+      if (Id === "outputTokens") result.summary.outputTokens = sum
       if (Id === "latency") {
-        const count = (Values || []).length
-        result.avgLatency = count ? sum / count : 0
+        const count = Values.length
+        result.summary.avgLatency = count ? sum / count : 0
+      }
+
+      // Build history for chart (only for invocations)
+      if (Id === "invocations") {
+        const points = Timestamps.map((t: any, i :any) => ({
+          date: new Date(t).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: range === "day" ? "2-digit" : undefined,
+          }),
+          count: Values[i],
+        }))
+        result.history = points.sort(
+          (a :any, b : any) => new Date(a.date).getTime() - new Date(b.date).getTime()
+        )
       }
     }
 
     console.log("✅ Parsed Analytics Result:", result)
-
     return NextResponse.json(result)
   } catch (err: any) {
     console.error("❌ Analytics error:", err)

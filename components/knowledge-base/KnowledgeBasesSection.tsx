@@ -1,16 +1,24 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
 import { Plus } from "lucide-react"
 import { KnowledgeBaseCard } from "./KnowledgeBaseCard"
 import { useKnowledgeBase } from "./useKnowledgeBase"
 
 export function KnowledgeBasesSection() {
-  const { knowledgeBases, loadKBs, addKnowledgeBase, loading, status } = useKnowledgeBase()
+  const { knowledgeBases = [], loadKBs, addKnowledgeBase, loading, status } = useKnowledgeBase()
 
-  useEffect(() => { loadKBs() }, [])
+  // ✅ Remove duplicates safely by ID
+  const uniqueKnowledgeBases = knowledgeBases.filter(
+    (kb, index, self) =>
+      kb?.id && index === self.findIndex((k) => k?.id === kb?.id)
+  )
+
+  useEffect(() => {
+    loadKBs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -18,7 +26,7 @@ export function KnowledgeBasesSection() {
         <div>
           <h3 className="text-lg font-medium">Connected Bedrock Knowledge Bases</h3>
           <p className="text-sm text-muted-foreground">
-            {knowledgeBases.length} knowledge bases connected
+            {uniqueKnowledgeBases.length} knowledge base{uniqueKnowledgeBases.length !== 1 && "s"} connected
           </p>
         </div>
 
@@ -33,8 +41,8 @@ export function KnowledgeBasesSection() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {knowledgeBases.map((kb) => (
-          <KnowledgeBaseCard key={kb.id} kb={kb} />
+        {uniqueKnowledgeBases.map((kb) => (
+          kb ? <KnowledgeBaseCard key={kb.id} kb={kb} /> : null
         ))}
       </div>
 
