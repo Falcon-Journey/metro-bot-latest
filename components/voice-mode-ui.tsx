@@ -252,7 +252,7 @@ export default function VoiceModeUI({
 
   </AIInputTools>
 </AIInputToolbar>
-    <div className="flex items-center gap-2 px-3 py-1 rounded-md bg-white/50">
+    {/* <div className="flex items-center gap-2 px-3 py-1 rounded-md bg-white/50">
       <span className="text-sm font-medium text-[#2d5a5a]">Agent:</span>
       <select
         value={agentType}
@@ -262,7 +262,7 @@ export default function VoiceModeUI({
         <option value="retrieval">Retrieval</option>
         <option value="booking">Booking</option>
       </select>
-    </div>
+    </div> */}
         
       </div>
     </div>

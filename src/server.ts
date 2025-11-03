@@ -4,323 +4,233 @@ import path from 'path';
 import { Server } from 'socket.io';
 import { NovaSonicBidirectionalStreamClient } from './client.ts';
 import { Buffer } from 'node:buffer';
-import { fromEnv, fromIni } from "@aws-sdk/credential-providers";
+import { fromEnv } from "@aws-sdk/credential-providers";
 import dotenv from 'dotenv';
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname } from "path";
 
-dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, "../.env") });
+
+// 🔧 Utility for pretty timestamps
+const ts = () => new Date().toISOString();
 
 // Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+console.log(`[${ts()}] 🚀 Starting Nova Sonic Socket Server...`);
+
 // Create the AWS Bedrock client
 const bedrockClient = new NovaSonicBidirectionalStreamClient({
-    requestHandlerConfig: {
-        maxConcurrentStreams: 10,
-    },
-    clientConfig: {
-        region: process.env.AWS_REGION || "us-east-1",
-        credentials: fromEnv() // This will use environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, etc.
-    }
+  requestHandlerConfig: {
+    maxConcurrentStreams: 10,
+  },
+  clientConfig: {
+    region: process.env.AWS_REGION_VOICE || "us-east-1",
+    credentials: fromEnv()
+  }
 });
 
-// Periodically check for and close inactive sessions (every minute)
-// Sessions with no activity for over 5 minutes will be force closed
+console.log(`[${ts()}] ✅ Bedrock client initialized for region ${process.env.AWS_REGION || "us-west-2"}`);
+
+// Periodic cleanup
 setInterval(() => {
-    console.log("Session cleanup check");
-    const now = Date.now();
-
-    // Check all active sessions
-    bedrockClient.getActiveSessions().forEach(sessionId => {
-        const lastActivity = bedrockClient.getLastActivityTime(sessionId);
-
-        // If no activity for 5 minutes, force close
-        if (now - lastActivity > 5 * 60 * 1000) {
-            console.log(`Closing inactive session ${sessionId} after 5 minutes of inactivity`);
-            try {
-                bedrockClient.forceCloseSession(sessionId);
-            } catch (error) {
-                console.error(`Error force closing inactive session ${sessionId}:`, error);
-            }
-        }
-    });
+  console.log(`[${ts()}] 🧹 Session cleanup check`);
+  const now = Date.now();
+  bedrockClient.getActiveSessions().forEach(sessionId => {
+    const lastActivity = bedrockClient.getLastActivityTime(sessionId);
+    if (now - lastActivity > 5 * 60 * 1000) {
+      console.log(`[${ts()}] ⚠️ Closing inactive session ${sessionId}`);
+      try {
+        bedrockClient.forceCloseSession(sessionId);
+      } catch (error) {
+        console.error(`[${ts()}] ❌ Error force closing inactive session ${sessionId}:`, error);
+      }
+    }
+  });
 }, 60000);
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-// Serve static files from the public directory
+
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Socket.IO connection handler
+// ✅ Socket.IO connection handler
 io.on('connection', (socket) => {
-    console.log('New client connected:', socket.id);
+  console.log(`[${ts()}] 🟢 Client connected: ${socket.id}`);
 
-    // Create a unique session ID for this client
-    const sessionId = socket.id;
-    let selectedUserId: string = '123';
-    let selectedVoiceId: string = 'tiffany';
+  const sessionId = socket.id;
+  let selectedUserId = '123';
+  let selectedVoiceId = 'tiffany';
 
-    try {
-        // Create session with the new API
-        const session = bedrockClient.createStreamSession(sessionId);
-        bedrockClient.initiateSession(sessionId)
+  try {
+    const session = bedrockClient.createStreamSession(sessionId);
+    bedrockClient.initiateSession(sessionId);
+    console.log(`[${ts()}] 🎧 Session created for socket ${sessionId}`);
 
-        setInterval(() => {
-            const connectionCount = Object.keys(io.sockets.sockets).length;
-            console.log(`Active socket connections: ${connectionCount}`);
-        }, 60000);
+    socket.on("setAgentType", ({ agentType }) => {
+      console.log(`[${ts()}] 🤖 Client ${socket.id} selected agent type: ${agentType}`);
+      socket.data.agentType = agentType;
+    });
 
-        // Set up event handlers
-        socket.on('setVoice', (data) => {
-            try {
-                if (data && typeof data.voiceId === 'string' && data.voiceId.trim().length > 0) {
-                    const sanitized = data.voiceId.trim();
-                    selectedVoiceId = sanitized;
-                    console.log(`Session ${sessionId} set voiceId: ${sanitized}`);
-                    // Inform client
-                    socket.emit('status', { message: `Voice selected: ${selectedVoiceId}` });
-                }
-            } catch (e) {
-                console.error('Failed to set voiceId', e);
-            }
-        });
-        socket.on('setUserId', (data) => {
-            try {
-                if (data && typeof data.user_id === 'string' && data.user_id.trim().length > 0) {
-                    const sanitized = data.user_id.trim();
-                    selectedUserId = sanitized;
-                    console.log(`Session ${sessionId} set user_id filter: ${sanitized}`);
-                    // Store in client session for downstream KB filtering
-                    bedrockClient.setSessionUserId(sessionId, sanitized);
-                    socket.emit('status', { message: `User selected: ${selectedUserId}` });
-                }
-            } catch (e) {
-                console.error('Failed to set user_id', e);
-            }
-        });
-        session.onEvent('contentStart', (data) => {
-            console.log('contentStart:', data);
-            socket.emit('contentStart', data);
-        });
+    socket.on("setVoice", (data) => {
+      if (data?.voiceId) {
+        selectedVoiceId = data.voiceId.trim();
+        console.log(`[${ts()}] 🎤 Voice set for ${sessionId}: ${selectedVoiceId}`);
+        socket.emit("status", { message: `Voice selected: ${selectedVoiceId}` });
+      }
+    });
 
-        session.onEvent('textOutput', (data) => {
-            console.log('Text output:', data);
-            socket.emit('textOutput', data);
-        });
+    socket.on("setUserId", (data) => {
+      if (data?.user_id) {
+        selectedUserId = data.user_id.trim();
+        console.log(`[${ts()}] 👤 UserId set for ${sessionId}: ${selectedUserId}`);
+        bedrockClient.setSessionUserId(sessionId, selectedUserId);
+      }
+    });
 
-        session.onEvent('audioOutput', (data) => {
-            console.log('Audio output received, sending to client');
-            socket.emit('audioOutput', data);
-        });
+    // === Session Event Handlers ===
+    session.onEvent("contentStart", (data) => {
+      console.log(`[${ts()}] ▶️ contentStart (${sessionId})`, data);
+      socket.emit("contentStart", data);
+    });
 
-        session.onEvent('error', (data) => {
-            console.error('Error in session:', data);
-            socket.emit('error', data);
-        });
+    session.onEvent("textOutput", (data) => {
+      console.log(`[${ts()}] 💬 textOutput (${sessionId}):`, data);
+      socket.emit("textOutput", data);
+    });
 
-        session.onEvent('toolUse', (data) => {
-            console.log('Tool use detected:', data.toolName);
-            socket.emit('toolUse', data);
-        });
+    session.onEvent("audioOutput", (data) => {
+      console.log(`[${ts()}] 🔊 audioOutput (${sessionId})`);
+      socket.emit("audioOutput", data);
+    });
 
-        session.onEvent('toolResult', (data) => {
-            console.log('Tool result received');
-            socket.emit('toolResult', data);
-        });
+    session.onEvent("error", (data) => {
+      console.error(`[${ts()}] ❗ Error (${sessionId}):`, data);
+      socket.emit("error", data);
+    });
 
-        session.onEvent('contentEnd', (data) => {
-            console.log('Content end received: ', data);
-            socket.emit('contentEnd', data);
-        });
+    session.onEvent("toolUse", (data) => {
+      console.log(`[${ts()}] 🛠️ Tool use (${sessionId}): ${data.toolName}`);
+      socket.emit("toolUse", data);
+    });
 
-        session.onEvent('streamComplete', () => {
-            console.log('Stream completed for client:', socket.id);
-            socket.emit('streamComplete');
-        });
+    session.onEvent("toolResult", (data) => {
+      console.log(`[${ts()}] 📦 Tool result (${sessionId})`);
+      socket.emit("toolResult", data);
+    });
 
-        // Simplified audioInput handler without rate limiting
-        socket.on('audioInput', async (audioData) => {
-            try {
-                // Convert base64 string to Buffer
-                const audioBuffer = typeof audioData === 'string'
-                    ? Buffer.from(audioData, 'base64')
-                    : Buffer.from(audioData);
+    session.onEvent("streamComplete", () => {
+      console.log(`[${ts()}] ✅ Stream complete (${sessionId})`);
+      socket.emit("streamComplete");
+    });
 
-                // Stream the audio
-                await session.streamAudio(audioBuffer);
+    // === Audio input streaming ===
+    socket.on("audioInput", async (audioData) => {
+      console.log(`[${ts()}] 🎙️ audioInput received (${sessionId})`);
+      try {
+        const buffer = typeof audioData === "string"
+          ? Buffer.from(audioData, "base64")
+          : Buffer.from(audioData);
+        await session.streamAudio(buffer);
+      } catch (error) {
+        console.error(`[${ts()}] ❌ Error streaming audio (${sessionId}):`, error);
+        socket.emit("error", { message: "Audio stream error", details: error });
+      }
+    });
 
-            } catch (error) {
-                console.error('Error processing audio:', error);
-                socket.emit('error', {
-                    message: 'Error processing audio',
-                    details: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
-        
-        socket.on("setAgentType", ({ agentType }) => {
-            console.log("Client selected agent type:", agentType)
-            socket.data.agentType = agentType // store for later logic
-        })
+    socket.on("promptStart", async () => {
+      console.log(`[${ts()}] ✏️ promptStart (${sessionId})`);
+      await session.setupPromptStart();
+    });
 
-        socket.on('promptStart', async () => {
-            try {
-                console.log('Prompt start received');
-                await session.setupPromptStart();
-            } catch (error) {
-                console.error('Error processing prompt start:', error);
-                socket.emit('error', {
-                    message: 'Error processing prompt start',
-                    details: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
+    socket.on("systemPrompt", async (data) => {
+      console.log(`[${ts()}] ⚙️ systemPrompt (${sessionId})`, data);
+      await session.setupSystemPrompt(undefined, undefined);
+    });
 
-        socket.on('systemPrompt', async (data) => {
-            try {
-                console.log('System prompt received', data);
-                await session.setupSystemPrompt(undefined, undefined);
-            } catch (error) {
-                console.error('Error processing system prompt:', error);
-                socket.emit('error', {
-                    message: 'Error processing system prompt',
-                    details: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
+    socket.on("audioStart", async () => {
+      console.log(`[${ts()}] ▶️ audioStart (${sessionId})`);
+      bedrockClient.setSessionVoiceId?.(sessionId, selectedVoiceId);
+      await session.setupStartAudio();
+    });
 
-        socket.on('audioStart', async (data) => {
-            try {
-                console.log('Audio start received', data);
-                // Pass selected voice downstream via client
-                bedrockClient.setSessionVoiceId?.(sessionId, selectedVoiceId);
-                await session.setupStartAudio();
-            } catch (error) {
-                console.error('Error processing audio start:', error);
-                socket.emit('error', {
-                    message: 'Error processing audio start',
-                    details: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
+    socket.on("stopAudio", async () => {
+      console.log(`[${ts()}] ⏹️ stopAudio (${sessionId})`);
+      try {
+        await session.endAudioContent();
+        await session.endPrompt();
+        await session.close();
+        console.log(`[${ts()}] 🧹 Session cleanup complete (${sessionId})`);
+      } catch (error) {
+        console.error(`[${ts()}] ❌ Error stopping audio (${sessionId}):`, error);
+      }
+    });
 
-        socket.on('stopAudio', async () => {
-            try {
-                console.log('Stop audio requested, beginning proper shutdown sequence');
+    socket.on("disconnect", async () => {
+      console.log(`[${ts()}] 🔴 Client disconnected: ${socket.id}`);
+      if (bedrockClient.isSessionActive(sessionId)) {
+        try {
+          console.log(`[${ts()}] 🧼 Cleaning up session ${sessionId}`);
+          await session.endAudioContent();
+          await session.endPrompt();
+          await session.close();
+        } catch (e) {
+          console.error(`[${ts()}] ❌ Cleanup error (${sessionId}):`, e);
+          bedrockClient.forceCloseSession(sessionId);
+        }
+      }
+    });
 
-                // Chain the closing sequence
-                await Promise.all([
-                    session.endAudioContent()
-                        .then(() => session.endPrompt())
-                        .then(() => session.close())
-                        .then(() => console.log('Session cleanup complete'))
-                ]);
-            } catch (error) {
-                console.error('Error processing streaming end events:', error);
-                socket.emit('error', {
-                    message: 'Error processing streaming end events',
-                    details: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
-
-        // Handle disconnection
-        socket.on('disconnect', async () => {
-            console.log('Client disconnected abruptly:', socket.id);
-
-            if (bedrockClient.isSessionActive(sessionId)) {
-                try {
-                    console.log(`Beginning cleanup for abruptly disconnected session: ${socket.id}`);
-
-                    // Add explicit timeouts to avoid hanging promises
-                    const cleanupPromise = Promise.race([
-                        (async () => {
-                            await session.endAudioContent();
-                            await session.endPrompt();
-                            await session.close();
-                        })(),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error('Session cleanup timeout')), 3000)
-                        )
-                    ]);
-
-                    await cleanupPromise;
-                    console.log(`Successfully cleaned up session after abrupt disconnect: ${socket.id}`);
-                } catch (error) {
-                    console.error(`Error cleaning up session after disconnect: ${socket.id}`, error);
-                    try {
-                        bedrockClient.forceCloseSession(sessionId);
-                        console.log(`Force closed session: ${sessionId}`);
-                    } catch (e) {
-                        console.error(`Failed even force close for session: ${sessionId}`, e);
-                    }
-                } finally {
-                    // Make sure socket is fully closed in all cases
-                    if (socket.connected) {
-                        socket.disconnect(true);
-                    }
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Error creating session:', error);
-        socket.emit('error', {
-            message: 'Failed to initialize session',
-            details: error instanceof Error ? error.message : String(error)
-        });
-        socket.disconnect();
-    }
+  } catch (error) {
+    console.error(`[${ts()}] ❌ Error creating session for ${socket.id}:`, error);
+    socket.emit("error", { message: "Failed to initialize session", details: error });
+    socket.disconnect();
+  }
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get("/health", (_, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Start the server
+// Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+  console.log(`[${ts()}] 🟢 Server listening on port ${PORT}`);
 });
 
-process.on('SIGINT', async () => {
-    console.log('Shutting down server...');
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log(`[${ts()}] 🛑 Shutting down server...`);
+  const forceExitTimer = setTimeout(() => {
+    console.error(`[${ts()}] ⏰ Force shutdown timeout`);
+    process.exit(1);
+  }, 5000);
 
-    const forceExitTimer = setTimeout(() => {
-        console.error('Forcing server shutdown after timeout');
-        process.exit(1);
-    }, 5000);
+  try {
+    await new Promise(resolve => io.close(resolve));
+    console.log(`[${ts()}] 🧩 Socket.IO closed`);
 
-    try {
-        // First close Socket.IO server which manages WebSocket connections
-        await new Promise(resolve => io.close(resolve));
-        console.log('Socket.IO server closed');
-
-        // Then close all active sessions
-        const activeSessions = bedrockClient.getActiveSessions();
-        console.log(`Closing ${activeSessions.length} active sessions...`);
-
-        await Promise.all(activeSessions.map(async (sessionId) => {
-            try {
-                await bedrockClient.closeSession(sessionId);
-                console.log(`Closed session ${sessionId} during shutdown`);
-            } catch (error) {
-                console.error(`Error closing session ${sessionId} during shutdown:`, error);
-                bedrockClient.forceCloseSession(sessionId);
-            }
-        }));
-
-        // Now close the HTTP server with a promise
-        await new Promise(resolve => server.close(resolve));
-        clearTimeout(forceExitTimer);
-        console.log('Server shut down');
-        process.exit(0);
-    } catch (error) {
-        console.error('Error during server shutdown:', error);
-        process.exit(1);
+    const activeSessions = bedrockClient.getActiveSessions();
+    console.log(`[${ts()}] 🔻 Closing ${activeSessions.length} sessions`);
+    for (const sessionId of activeSessions) {
+      try {
+        await bedrockClient.closeSession(sessionId);
+      } catch {
+        bedrockClient.forceCloseSession(sessionId);
+      }
     }
+
+    await new Promise(resolve => server.close(resolve));
+    clearTimeout(forceExitTimer);
+    console.log(`[${ts()}] ✅ Server shutdown complete`);
+    process.exit(0);
+  } catch (err) {
+    console.error(`[${ts()}] ❌ Shutdown error:`, err);
+    process.exit(1);
+  }
 });

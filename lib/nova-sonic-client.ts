@@ -27,7 +27,7 @@ export class NovaSonicSocketClient {
   }
 
   private initSocket(): void {
-    this.socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001", {
+    this.socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:8080", {
       transports: ["websocket", "polling"],
       timeout: 20000,
       reconnection: true,
