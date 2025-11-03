@@ -5,7 +5,7 @@ import { useEffect, useState, useRef } from "react"
 import Image from "next/image"
 import { MicIcon, Volume2Icon, StampIcon as StopIcon, MessageSquareIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import favicon from "@/public/favicon.png"
+import logo from "@/public/images/logo.svg"
 import { AudioPlayer, AudioProcessor, base64ToFloat32Array } from "@/lib/audio-utils"
 import { NovaSonicSocketClient } from "@/lib/nova-sonic-client"
 import {
@@ -184,7 +184,7 @@ export default function VoiceModeUI({
               <MicIcon className="w-12 h-12 text-white animate-pulse" />
             ) : (
               <Image
-                src={favicon || "/placeholder.svg"}
+                src={logo || "/placeholder.svg"}
                 alt="Logo"
                 className={`w-12 h-12 text-white ${isConnected ? "animate-pulse" : ""}`}
               />
@@ -249,8 +249,8 @@ export default function VoiceModeUI({
           <AIInputModelSelectItem key={m.id} value={m.id} className="flex items-center gap-2">
             {m.provider === "bedrock" && (
               <Image
-                src={favicon || "/placeholder.svg"}
-                alt="1to1Help Logo"
+                src={logo || "/placeholder.svg"}
+                alt="Metro Logo"
                 width={16}
                 height={16}
                 className="rounded"
