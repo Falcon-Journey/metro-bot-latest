@@ -24,17 +24,17 @@ interface VoiceModeUIProps {
   suggestions: string[]
   isVoiceMode: boolean
   setIsVoiceMode: React.Dispatch<React.SetStateAction<boolean>>
-  model: string
-  setModel: React.Dispatch<React.SetStateAction<string>>
-  models: { id: string; name: string; provider: string }[]
+  // model: string
+  // setModel: React.Dispatch<React.SetStateAction<string>>
+  // models: { id: string; name: string; provider: string }[]
 }
 
 export default function VoiceModeUI({
   isVoiceMode,
   setIsVoiceMode,
-  model,
-  setModel,
-  models,
+  // model,
+  // setModel,
+  // models,
 }: VoiceModeUIProps) {
   const [active, setActive] = useState(false)
   const [transcript, setTranscript] = useState("")
@@ -240,27 +240,16 @@ export default function VoiceModeUI({
       </span>
     </div>
 
-    <AIInputModelSelect onValueChange={setModel} value={model}>
+    <AIInputModelSelect onValueChange={(val) => setAgentType(val as "retrieval" | "booking")} value={agentType}>
       <AIInputModelSelectTrigger className="text-[#2d5a5a]">
-        <AIInputModelSelectValue />
+        <AIInputModelSelectValue placeholder="Select agent type" />
       </AIInputModelSelectTrigger>
       <AIInputModelSelectContent>
-        {models.map((m) => (
-          <AIInputModelSelectItem key={m.id} value={m.id} className="flex items-center gap-2">
-            {m.provider === "bedrock" && (
-              <Image
-                src={logo || "/placeholder.svg"}
-                alt="Metro Logo"
-                width={16}
-                height={16}
-                className="rounded"
-              />
-            )}
-            {m.name}
-          </AIInputModelSelectItem>
-        ))}
+        <AIInputModelSelectItem value="retrieval">Retrieval Agent</AIInputModelSelectItem>
+        <AIInputModelSelectItem value="booking">Booking Agent</AIInputModelSelectItem>
       </AIInputModelSelectContent>
     </AIInputModelSelect>
+
   </AIInputTools>
 </AIInputToolbar>
     <div className="flex items-center gap-2 px-3 py-1 rounded-md bg-white/50">
