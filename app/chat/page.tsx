@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition"
-import VoiceModeUI from "@/components/voice-mode-ui"
 
 // ---------------- Utility functions ---------------- //
+
 function createSessionId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID()
   return `session-${Math.random().toString(36).slice(2)}`
@@ -35,6 +35,7 @@ function sanitizeAssistantOutput(text: string) {
 }
 
 // ---------------- MessageList ---------------- //
+
 function MessageList({ messages, loading }: { messages: Message[]; loading?: boolean }) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, loading])
@@ -62,32 +63,54 @@ function MessageList({ messages, loading }: { messages: Message[]; loading?: boo
           )}
         </div>
       ))}
-      {loading && (
-        <div className="flex items-start gap-3 justify-start">
-          <Avatar className="size-8">
-            <AvatarFallback className="bg-accent text-accent-foreground">MS</AvatarFallback>
-          </Avatar>
-          <div className="max-w-[80%] rounded-lg bg-muted px-4 py-3">
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-3 w-40" />
-              <Skeleton className="h-3 w-56" />
-            </div>
-          </div>
-        </div>
-      )}
+{loading && (
+  <div className="flex items-start gap-3 justify-start">
+    <Avatar className="size-8">
+      <AvatarFallback className="bg-accent text-accent-foreground">MS</AvatarFallback>
+    </Avatar>
+    <div className="max-w-[80%] rounded-lg bg-muted px-4 py-3">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-3 w-40" />
+        <Skeleton className="h-3 w-56" />
+      </div>
+    </div>
+  </div>
+)}
       <div ref={bottomRef} />
     </div>
   )
 }
 
+// ---------------- Mic Icon ---------------- //
+
+function MicIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <path
+        d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Zm6-3a6 6 0 1 1-12 0H4a8 8 0 0 0 7 7.938V22h2v-3.062A8 8 0 0 0 20 11h-2Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 // ---------------- Chat Input ---------------- //
-function ChatInput({ onSend, disabled }: { onSend: (text: string) => void; disabled?: boolean }) {
+
+function ChatInput({
+  onSend,
+  disabled,
+}: {
+  onSend: (text: string) => void
+  disabled?: boolean
+}) {
   const [text, setText] = useState("")
-  const { supported, listening, interimTranscript, finalTranscript, start, stop, reset } = useSpeechRecognition({
-    lang: "en-US",
-    continuous: true,
-    interimResults: true,
-  })
+
+  const { supported, listening, interimTranscript, finalTranscript, start, stop, reset } =
+    useSpeechRecognition({
+      lang: "en-US",
+      continuous: true,
+      interimResults: true,
+    })
 
   useEffect(() => {
     if (!listening) return
@@ -96,7 +119,9 @@ function ChatInput({ onSend, disabled }: { onSend: (text: string) => void; disab
   }, [listening, interimTranscript, finalTranscript])
 
   useEffect(() => {
-    if (!listening && finalTranscript) setText(finalTranscript.trim())
+    if (!listening && finalTranscript) {
+      setText(finalTranscript.trim())
+    }
   }, [listening, finalTranscript])
 
   return (
@@ -122,6 +147,31 @@ function ChatInput({ onSend, disabled }: { onSend: (text: string) => void; disab
             className="pr-12"
             disabled={disabled}
           />
+          <button
+            type="button"
+            aria-label={listening ? "Stop recording" : "Start recording"}
+            aria-pressed={listening}
+            onClick={() => {
+              if (!supported) {
+                alert("Speech recognition is not supported in this browser.")
+                return
+              }
+              if (listening) stop()
+              else {
+                reset()
+                start()
+              }
+            }}
+            className={cn(
+              "absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-primary transition-colors",
+              listening ? "bg-primary text-primary-foreground" : "hover:bg-secondary",
+            )}
+          >
+            <span className="flex items-center gap-1">
+              <MicIcon className={cn("size-5", listening && "opacity-90")} />
+              {listening && <span className="text-xs font-medium">Listening</span>}
+            </span>
+          </button>
         </div>
         <Button
           onClick={() => {
@@ -137,30 +187,44 @@ function ChatInput({ onSend, disabled }: { onSend: (text: string) => void; disab
           Send
         </Button>
       </div>
-      {!supported && <div className="text-xs text-muted-foreground">Speech recognition not supported.</div>}
+      {!supported && (
+        <div className="text-xs text-muted-foreground">
+          Your browser does not support speech recognition. Try Chrome.
+        </div>
+      )}
     </div>
   )
 }
 
 // ---------------- Quick Suggestions ---------------- //
-function QuickSuggestions({ mode, onPick, disabled }: { mode: "booking" | "retrieve"; onPick: (text: string) => void; disabled?: boolean }) {
+
+function QuickSuggestions({
+  mode,
+  onPick,
+  disabled,
+}: {
+  mode: "booking" | "retrieve"
+  onPick: (text: string) => void
+  disabled?: boolean
+}) {
   const suggestions =
     mode === "booking"
-      ? [
-          "Book a ride from DC to NYC this Friday",
-          "NYC to DC on Friday for 15 people one way leaving at 9am from Union station and arrive at 2pm at Penn Station",
-        ]
-      : [
-          "What’s the price for a one-way trip from NYC to DC for 15 people?",
-          "Who arranges and pays for the driver’s hotel room?",
-        ]
+      ? ["Book a ride from DC to NYC this Friday", "NYC to DC on Friday for 15 people one way leaving at 9am from Union station and arrive at 2pm at penn station"]
+      : ["What’s the price for a one-way trip from NYC to DC for 15 people?", "Who arranges and pays for the driver’s hotel room?"]
 
   return (
     <div className="w-full">
       <div className="mb-2 text-xs font-medium text-muted-foreground">Quick suggestions</div>
       <div className="flex flex-wrap gap-2">
         {suggestions.map((label) => (
-          <Button key={label} type="button" variant="outline" disabled={disabled} onClick={() => onPick(label)} className="rounded-full border-primary/30 text-primary hover:bg-primary/10">
+          <Button
+            key={label}
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => onPick(label)}
+            className="rounded-full border-primary/30 text-primary hover:bg-primary/10 hover:text-primary text-xs sm:text-xs"
+          >
             {label}
           </Button>
         ))}
@@ -170,6 +234,7 @@ function QuickSuggestions({ mode, onPick, disabled }: { mode: "booking" | "retri
 }
 
 // ---------------- Main Chat Page ---------------- //
+
 export default function ChatPage() {
   const [sessionId] = useState(createSessionId)
   const [messages, setMessages] = useState<Message[]>([
@@ -178,7 +243,6 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false)
   const [hasSentFirstMessage, setHasSentFirstMessage] = useState(false)
   const [mode, setMode] = useState<"booking" | "retrieve">("booking")
-  const [isVoiceMode, setIsVoiceMode] = useState(false)
 
   const invisibleContext = useMemo(() => {
     if (typeof window === "undefined") return ""
@@ -186,53 +250,107 @@ export default function ChatPage() {
     const locale = typeof navigator !== "undefined" ? navigator.language : "en-US"
     const timeString = now.toLocaleString(locale, { dateStyle: "full", timeStyle: "short" })
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone?.replace(/_/g, " ")
-    return `Context (hidden): Local time is ${timeString}, timezone ${timeZone}`
+    const locationDescription = timeZone ? `${timeZone}` : "an unknown location"
+    return `Context (hidden from the user): The local time is ${timeString}, and the approximate location based on timezone is ${locationDescription}.`
   }, [])
 
-  const send = async (text: string) => {
-    if (loading) return
-    const userMsg: Message = { id: `${Date.now()}-u`, role: "user", content: text }
-    setMessages((m) => [...m, userMsg])
-    setLoading(true)
-    const msgId = `${Date.now()}-a`
+  const triggerPhrases = [
+  "let me look for pricing for similar trips",
+  "our sales team will contact you soon to confirm final details",
+  "checking pricing for similar trips",
+  "finding price estimates",
+]
 
-    try {
-      const payload = hasSentFirstMessage || !invisibleContext ? text : `${invisibleContext}\n\n${text}`
-      const res = await fetch("/api/bedrock-agent", {
+const send = async (text: string) => {
+  if (loading) return
+  const userMsg: Message = { id: `${Date.now()}-u`, role: "user", content: text }
+  setMessages((m) => [...m, userMsg])
+  setLoading(true)
+
+  const msgId = `${Date.now()}-a`
+
+  try {
+    const payload =
+      hasSentFirstMessage || !invisibleContext
+        ? text
+        : `${invisibleContext}\n\n${text}`
+
+    const res = await fetch("/api/bedrock-agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: payload, sessionId, mode }),
+    })
+
+    if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value, { stream: true })
+      fullText += chunk
+      setMessages((prev) => {
+        const hasMsg = prev.some((m) => m.id === msgId)
+        if (!hasMsg) {
+          return [...prev, { id: msgId, role: "assistant", content: chunk }]
+        }
+        return prev.map((m) =>
+          m.id === msgId ? { ...m, content: fullText } : m,
+        )
+      })
+    }
+
+    // ✅ Step 1: finalize and show the assistant message
+    fullText = sanitizeAssistantOutput(fullText)
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
+    )
+
+    // ✅ Step 2: then check for triggers AFTER the main message is shown
+    const normalizedText = normalizeText(fullText)
+    const containsTrigger = triggerPhrases.some((phrase) =>
+      normalizedText.includes(normalizeText(phrase)),
+    )
+
+    if (containsTrigger) {
+      const followUpRes = await fetch("/api/bedrock-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: payload, sessionId, mode }),
+        body: JSON.stringify({
+          input: "What is the estimated price for this trip?",
+          sessionId,
+          mode,
+        }),
       })
-      if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let fullText = ""
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        fullText += chunk
-        setMessages((prev) => {
-          const exists = prev.some((m) => m.id === msgId)
-          if (!exists) return [...prev, { id: msgId, role: "assistant", content: chunk }]
-          return prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m))
-        })
+      if (followUpRes.ok) {
+        const followUpData = sanitizeAssistantOutput(await followUpRes.text())
+        // ✅ Append follow-up as a NEW message instead of replacing the original
+        setMessages((prev) => [
+          ...prev,
+          { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
+        ])
       }
-      setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, content: sanitizeAssistantOutput(fullText) } : m)))
-    } catch (e) {
-      console.error("Chat error:", e)
-      setMessages((m) => [
-        ...m,
-        { id: `${Date.now()}-e`, role: "assistant", content: "Sorry, I couldn’t reach the agent." },
-      ])
-    } finally {
-      setLoading(false)
-      if (!hasSentFirstMessage) setHasSentFirstMessage(true)
     }
+  } catch (e) {
+    console.error("❌ Chat error:", e)
+    setMessages((m) => [
+      ...m,
+      {
+        id: `${Date.now()}-e`,
+        role: "assistant",
+        content:
+          "Sorry, I couldn’t reach the agent. Verify env vars and AWS configuration.",
+      },
+    ])
+  } finally {
+    setLoading(false)
+    if (!hasSentFirstMessage) setHasSentFirstMessage(true)
   }
+}
 
-  const handleSuggestionClick = (s: string) => send(s)
 
   return (
     <main className="flex h-[100dvh] flex-col">
@@ -240,57 +358,51 @@ export default function ChatPage() {
       <header className="flex items-center justify-between border-b bg-background px-4 py-3 md:px-6">
         <div className="flex items-center gap-3">
           <img src="/images/logo.svg" alt="Metropolitan Shuttle" className="h-6 w-auto" />
+          <span className="sr-only">Metropolitan Shuttle</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-sm font-medium text-muted-foreground capitalize">
             {mode === "booking" ? "Shuttle Booking Mode" : "Retrieve Mode"}
           </div>
-          <Button variant="outline" size="sm" onClick={() => setMode(mode === "booking" ? "retrieve" : "booking")}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMode(mode === "booking" ? "retrieve" : "booking")}
+          >
             Switch to {mode === "booking" ? "Retrieve" : "Booking"}
-          </Button>
-          <Button variant="default" size="sm" onClick={() => setIsVoiceMode(!isVoiceMode)}>
-            {isVoiceMode ? "Text Mode" : "Voice Mode"}
           </Button>
         </div>
       </header>
 
-      {/* Conditional Body */}
-      {isVoiceMode ? (
-        <VoiceModeUI
-          handleSuggestionClick={handleSuggestionClick}
-          suggestions={mode === "booking"
-            ? ["Book a shuttle to NYC", "Book a one-way trip for 15 people"]
-            : ["Check price for a trip", "What’s included in the booking?"]}
-          isVoiceMode={isVoiceMode}
-          setIsVoiceMode={setIsVoiceMode}
-        />
-      ) : (
-        <>
-          <section className="flex-1 bg-secondary">
-            <div className="mx-auto flex h-full max-w-3xl flex-col px-4 py-6 md:px-6 md:py-8">
-              <h1 className="text-pretty text-xl font-semibold text-foreground md:text-2xl">
-                {mode === "booking" ? "Shuttle Booking Assistant" : "Trip Retrieval Assistant"}
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {mode === "booking" ? "Let us help you book your shuttle!" : "Ask about past bookings or trip details."}
-              </p>
-              <div className="mt-6 flex-1 overflow-y-auto">
-                <MessageList messages={messages} loading={loading} />
-              </div>
-            </div>
-          </section>
-          <footer className="border-t bg-background">
-            <div className="mx-auto w-full max-w-3xl px-4 py-5 md:px-6 md:py-7">
-              <div className="mb-3 md:mb-4">
-                <QuickSuggestions mode={mode} onPick={handleSuggestionClick} disabled={loading} />
-              </div>
-              <div className="pb-6 md:pb-6">
-                <ChatInput onSend={send} disabled={loading} />
-              </div>
-            </div>
-          </footer>
-        </>
-      )}
+      {/* Body */}
+      <section className="flex-1 bg-secondary">
+        <div className="mx-auto flex h-full max-w-3xl flex-col px-4 py-6 md:px-6 md:py-8">
+          <h1 className="text-pretty text-xl font-semibold text-foreground md:text-2xl">
+            {mode === "booking" ? "Shuttle Booking Assistant" : "Trip Retrieval Assistant"}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {mode === "booking"
+              ? "Let us help you book your shuttle!"
+              : "Ask about past bookings or trip details."}
+          </p>
+
+          <div className="mt-6 flex-1 overflow-y-auto">
+            <MessageList messages={messages} loading={loading} />
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t bg-background">
+        <div className="mx-auto w-full max-w-3xl px-4 py-5 md:px-6 md:py-7">
+          <div className="mb-3 md:mb-4">
+            <QuickSuggestions mode={mode} onPick={(t) => send(t)} disabled={loading} />
+          </div>
+          <div className="pb-6 md:pb-6">
+            <ChatInput onSend={send} disabled={loading} />
+          </div>
+        </div>
+      </footer>
     </main>
   )
 }
