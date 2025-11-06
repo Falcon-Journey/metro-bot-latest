@@ -37,27 +37,44 @@ export function AnalyticsSection() {
   const [history, setHistory] = useState<{ date: string; count: number }[]>([])
   const [filter, setFilter] = useState<FilterType>("Day")
 
-const fetchStats = async () => {
-  const res = await fetch(`/api/analytics?range=${filter.toLowerCase()}`)
-  const json = await res.json()
+  const fetchStats = async () => {
+    const res = await fetch(`/api/analytics?range=${filter.toLowerCase()}`)
+    const json = await res.json()
 
-  // support both API shapes
-  if (json.summary && json.history) {
-    setData(json.summary)
-    setHistory(json.history)
-  } else {
-    setData({
+    // support both API shapes
+    const summary = json.summary ?? {
       invocations: json.invocations ?? 0,
       inputTokens: json.inputTokens ?? 0,
       outputTokens: json.outputTokens ?? 0,
       avgLatency: json.avgLatency ?? 0,
-    })
-    setHistory(
-      json.history ??
-        [{ date: new Date().toISOString().slice(0, 10), count: json.invocations ?? 0 }]
-    )
+    }
+    setData(summary)
+
+    const rawHistory = json.history ?? [
+      { date: new Date().toISOString().slice(0, 10), count: summary.invocations ?? 0 },
+    ]
+
+    // ✅ Group by normalized date safely
+    const grouped: Record<string, number> = {}
+    for (const entry of rawHistory) {
+      const parsed = new Date(entry.date)
+      if (!entry.date || isNaN(parsed.getTime())) continue // skip invalid dates
+      const dateKey = parsed.toISOString().slice(0, 10)
+      grouped[dateKey] = (grouped[dateKey] || 0) + (entry.count ?? 0)
+    }
+
+    // ✅ Convert to sorted array
+    const aggregated = Object.entries(grouped)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+
+    if (aggregated.length === 0) {
+      const today = new Date().toISOString().slice(0, 10)
+      setHistory([{ date: today, count: summary.invocations ?? 0 }])
+    } else {
+      setHistory(aggregated)
+    }
   }
-}
 
   useEffect(() => {
     fetchStats()
