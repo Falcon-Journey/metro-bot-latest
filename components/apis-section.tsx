@@ -65,7 +65,7 @@ export function ApisSection() {
 
   const bedrockApi = {
     name: "Bedrock Agent Invocation",
-    path: "/api/bedrock-agent",
+    path: "/api/bedrock-chat",
     method: "POST",
     description: "Send a request to your Bedrock Agent and stream its response.",
     exampleBody: `{
