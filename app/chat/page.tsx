@@ -507,7 +507,9 @@ export default function ChatPage() {
       const res = await fetch("/api/bedrock-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: payload, sessionId, mode }),
+        body: JSON.stringify({
+          messages: [{ role: "user", content: payload }]
+        }),
       })
 
       if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
