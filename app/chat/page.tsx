@@ -504,13 +504,32 @@ export default function ChatPage() {
           ? text
           : `${invisibleContext}\n\n${text}`
 
-      const res = await fetch("/api/bedrock-agent", {
+      let endpoint = "";
+      let body: any = {};
+
+      if (mode === "retrieve") {
+        // 🔎 Retrieval Agent
+        endpoint = "/api/bedrock-agent";
+        body = {
+          input: payload,   // plain text
+          sessionId,
+          mode              // "retrieve"
+        };
+      } else {
+        // 🚐 Booking Agent (Converse + tools)
+        endpoint = "/api/bedrock-booking-agent";
+        body = {
+          messages: [
+            { role: "user", content: payload }
+          ]
+        };
+      }
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: payload }]
-        }),
-      })
+        body: JSON.stringify(body),
+      });
 
       if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
       const reader = res.body.getReader()
