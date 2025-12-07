@@ -26,32 +26,226 @@ const lambda = new LambdaClient({
   },
 });
 
-const SYSTEM_PROMPT = `You are a friendly shuttle booking assistant for Metropolitan Shuttle.
+// Helper functions for state tracking
+function extractBookingState(messages: Message[]): any {
+  const state: any = {
+    name: null,
+    email: null,
+    group_size_category: null,
+    num_passengers: null,
+    pickup_location: null,
+    dropoff_location: null,
+    service_date: null,
+    trip_direction: null,
+    return_date: null,
+    return_time: null
+  };
+
+  for (const msg of messages) {
+    if (msg.role === "user" && msg.content) {
+      for (const block of msg.content) {
+        if (block.text) {
+          const text = block.text.toLowerCase();
+          
+          // Extract date
+          if (!state.service_date && (text.includes('friday') || text.includes('saturday') || 
+              text.includes('sunday') || text.includes('monday') || text.includes('tuesday') || 
+              text.includes('wednesday') || text.includes('thursday') || /\d{1,2}\/\d{1,2}/.test(text))) {
+            state.service_date = block.text.match(/(this |next )?\w+day|(\d{1,2}\/\d{1,2}(\/\d{2,4})?)/i)?.[0] || null;
+          }
+          
+          // Extract trip direction
+          if (!state.trip_direction) {
+            if (text.includes('round trip') || text.includes('return')) {
+              state.trip_direction = 'return';
+            } else if (text.includes('book') || text.includes('ride') || text.includes('from')) {
+              state.trip_direction = 'one-way';
+            }
+          }
+          
+          // Extract passenger count - FIXED REGEX
+          if (!state.num_passengers) {
+            const match = text.match(/(\d+)\s*(people|passengers?|persons?|pax|passenger)/);
+            if (match) {
+              state.num_passengers = parseInt(match[1]);
+              const count = state.num_passengers;
+              if (count <= 4) state.group_size_category = 'small';
+              else if (count <= 10) state.group_size_category = 'medium';
+              else state.group_size_category = 'large';
+            }
+          }
+          
+          // Extract locations
+          if (!state.pickup_location || !state.dropoff_location) {
+            const fromTo = text.match(/from\s+([^to]+)\s+to\s+(.+?)(?:\s+this|\s+on|\s+for|\s+\d|$)/i);
+            if (fromTo) {
+              if (!state.pickup_location) state.pickup_location = fromTo[1].trim();
+              if (!state.dropoff_location) state.dropoff_location = fromTo[2].trim();
+            }
+            
+            // Look for specific airport mentions
+            if (text.includes('airport')) {
+              if (text.includes('reagan') || text.includes('dca')) {
+                state.pickup_location = state.pickup_location?.includes('dc') ? 'Reagan National (DCA)' : state.pickup_location;
+              }
+              if (text.includes('dulles') || text.includes('iad')) {
+                state.pickup_location = state.pickup_location?.includes('dc') ? 'Dulles (IAD)' : state.pickup_location;
+              }
+              if (text.includes('jfk')) {
+                state.dropoff_location = state.dropoff_location?.includes('nyc') ? 'JFK Airport' : state.dropoff_location;
+              }
+              if (text.includes('lga') || text.includes('laguardia')) {
+                state.dropoff_location = state.dropoff_location?.includes('nyc') ? 'LaGuardia (LGA)' : state.dropoff_location;
+              }
+            }
+          }
+          
+          // Extract email
+          if (!state.email) {
+            const emailMatch = text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+            if (emailMatch) state.email = emailMatch[0];
+          }
+          
+          // Extract name
+          if (!state.name && text.match(/my name is|i'm|i am/i)) {
+            const nameMatch = text.match(/(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
+            if (nameMatch) state.name = nameMatch[1];
+          }
+        }
+      }
+    }
+  }
+  
+  return state;
+}
+
+function getMissingFields(state: any): string[] {
+  const missing: string[] = [];
+  
+  if (!state.name) missing.push('name');
+  if (!state.email) missing.push('email');
+  if (!state.group_size_category) missing.push('group size');
+  if (!state.pickup_location || state.pickup_location.length < 5) missing.push('specific pickup location');
+  if (!state.dropoff_location || state.dropoff_location.length < 5) missing.push('specific dropoff location');
+  if (!state.service_date) missing.push('service date');
+  if (!state.trip_direction) missing.push('trip direction');
+  
+  if (state.trip_direction === 'return') {
+    if (!state.return_date) missing.push('return date');
+  }
+  
+  return missing;
+}
+
+function buildSystemPrompt(conversationMessages: Message[]): string {
+  const bookingState = extractBookingState(conversationMessages);
+  
+  const basePrompt = `You are a friendly shuttle booking assistant for Metropolitan Shuttle.
 
 YOUR ROLE:
-- Help users book shuttle trips quickly and efficiently
-- Collect required info: name, email, group size, pickup/dropoff, service date, trip direction
-- For return trips, also collect return date/time
-- Ask max 3 questions at once
-- Be conversational and natural
+- Help users book shuttle trips quickly and efficiently.
+- ALWAYS remember the details the user has already provided. Never ask again for information the user already stated.
+- Only ask for missing details, and only when needed for the booking flow.
+
+CRITICAL MEMORY RULE:
+Before asking ANY question, review the ENTIRE conversation history. If the user has already provided the information, DO NOT ask for it again under any circumstances.
+
+WHEN ASKING FOR PICKUP/DROPOFF:
+- If the user says only the cities (e.g., "DC to NYC"), acknowledge you have pickup city and destination city.
+- Then ask *specifically* for exact pickup address/location in the origin city and exact dropoff address/location in the destination city.
+- DO NOT ask where the user is going again if they already said (e.g., "DC to NYC").
 
 TOOLS AVAILABLE:
-1. save_booking - Save completed booking to system
-2. get_pricing - Retrieve pricing estimates from knowledge base
-3. search_faqs - Search FAQ knowledge base
+1. save_booking — Save completed booking (call ONLY when all required fields are present).
+2. get_pricing — Use when user asks about cost.
+3. search_faqs — Use when user asks policy or general questions.
 
 BOOKING FLOW:
-1. Greet and ask where they want to go
-2. Progressively collect: group size, date, trip type (one-way/return)
-3. Get contact info (name, email) near the end
-4. When all required fields collected, call save_booking
-5. After successful save, offer to check pricing if not already provided
+1. Progressively collect required info: group size, date, pickup city/location, dropoff city/location, trip direction (one-way or return).
+2. Ask at most 2-3 questions at once, but NEVER ask for information already provided.
+3. For return trips, also collect return date/time.
+4. Collect name and email near the end.
+5. When all required fields are collected, call save_booking.
+6. After saving, offer pricing help if not already asked.
+
+DATE HANDLING:
+- If user says "this Friday," "next Tuesday," "December 12," etc., that IS the service_date.
+- NEVER ask for the date again if already provided.
+- Current date context: Use relative dates (this Friday = next Friday from today).
+
+TRIP DIRECTION:
+- If user says "Book a ride from X to Y" without mentioning "return" or "round trip", assume ONE-WAY.
+- NEVER ask about trip direction if the user's phrasing clearly indicates one-way.
 
 REQUIRED FIELDS:
-- name, email, group_size_category, pickup_location, dropoff_location, service_date, trip_direction
+- name
+- email
+- group_size_category (small/medium/large)
+- pickup_location (full address or exact spot)
+- dropoff_location (full address or exact spot)
+- service_date
+- trip_direction (infer "one-way" if not specified as return)
 - If return trip: return_date, return_time
 
-BE CONCISE. Don't over-explain. Natural conversation flow.`;
+EXAMPLES OF CORRECT BEHAVIOR:
+
+Example 1 - Good (No Repetition):
+User: "Book a ride from DC to NYC this Friday"
+Assistant: "Great! I can help you book from DC to NYC this Friday. I have:
+✓ Route: DC to NYC
+✓ Date: This Friday (December 12, 2025)
+✓ Trip type: One-way
+
+I just need:
+- How many passengers? (for group size)
+- Specific pickup location in DC? (exact address or landmark)
+- Specific dropoff location in NYC? (exact address or landmark)"
+
+User: "10 passengers, will confirm exact location with agency later"
+Assistant: "Perfect! 10 passengers (medium group). I have:
+✓ 10 passengers (medium group)
+✓ Route: DC to NYC
+✓ Date: This Friday (December 12, 2025)
+✓ Trip type: One-way
+
+I understand you'll confirm exact locations later with the agency. To complete your booking, I just need your name and email address."
+
+Example 2 - Bad (Asks for already provided info):
+User: "Book a ride from DC to NYC this Friday"
+Assistant: "I'll help you book. What date would you like to travel?" ❌ WRONG - Date already provided!
+Assistant: "Is this a one-way or round trip?" ❌ WRONG - User said "a ride", implies one-way!
+
+Example 3 - Good (Handles additional details):
+User: "6 people, Reagan National to JFK"
+Assistant: "Excellent! I have everything for your DC to NYC trip on Friday, December 12:
+✓ 6 passengers (medium group)
+✓ Reagan National (DCA) to JFK
+✓ Date: Friday, December 12, 2025
+✓ One-way trip
+
+To complete your booking, I just need your name and email address."
+
+STYLE:
+- Be concise, helpful, and conversational.
+- Never repeat questions the user has already answered.
+- Only request the specific missing details.
+- Acknowledge what you know before asking for what you need.
+- Use checkmarks (✓) to show what information you have.`;
+
+  const stateReminder = `
+
+═══════════════════════════════════════
+CURRENT BOOKING STATE (DO NOT ASK FOR THESE AGAIN):
+${JSON.stringify(bookingState, null, 2)}
+
+MISSING FIELDS THAT YOU STILL NEED TO ASK FOR:
+${getMissingFields(bookingState).join(', ') || 'None - ready to save!'}
+═══════════════════════════════════════
+
+REMEMBER: Only ask for the MISSING fields listed above. Never ask for fields that already have values in the booking state.`;
+
+  return basePrompt + stateReminder;
+}
 
 const TOOLS: Tool[] = [
   {
@@ -199,6 +393,10 @@ export async function POST(req: NextRequest) {
       return new Response("Invalid request: messages array required", { status: 400 });
     }
 
+    // DEBUG LOGGING
+    console.log("📩 Received messages count:", messages.length);
+    console.log("📩 Messages:", JSON.stringify(messages, null, 2));
+
     const stream = new ReadableStream({
       async start(controller) {
         try {
@@ -208,6 +406,11 @@ export async function POST(req: NextRequest) {
             content: [{ text: msg.content }] as ContentBlock[]
           }));
 
+          // DEBUG: Log extracted state
+          const currentState = extractBookingState(conversationMessages);
+          console.log("📊 Extracted booking state:", JSON.stringify(currentState, null, 2));
+          console.log("❓ Missing fields:", getMissingFields(currentState));
+
           let continueLoop = true;
           let maxIterations = 5;
           let iteration = 0;
@@ -215,15 +418,18 @@ export async function POST(req: NextRequest) {
           while (continueLoop && iteration < maxIterations) {
             iteration++;
 
+            // Build dynamic system prompt with current state
+            const systemPrompt = buildSystemPrompt(conversationMessages);
+            
             const command = new ConverseStreamCommand({
-              modelId: "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+              modelId: "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
               messages: conversationMessages,
-              system: [{ text: SYSTEM_PROMPT }],
+              system: [{ text: systemPrompt }],
               toolConfig: { tools: TOOLS },
               inferenceConfig: {
-                temperature: 0.3,
+                temperature: 0.2,
                 topP: 0.9,
-                maxTokens: 1024
+                maxTokens: 2048
               }
             });
 

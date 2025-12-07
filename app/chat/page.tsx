@@ -493,7 +493,10 @@ export default function ChatPage() {
   const send = async (text: string) => {
     if (loading) return
     const userMsg: Message = { id: `${Date.now()}-u`, role: "user", content: text }
-    setMessages((m) => [...m, userMsg])
+    
+    // ✅ CRITICAL FIX: Build the full conversation history
+    const updatedMessages = [...messages, userMsg]
+    setMessages(updatedMessages)
     setLoading(true)
 
     const msgId = `${Date.now()}-a`
@@ -511,18 +514,28 @@ export default function ChatPage() {
         // 🔎 Retrieval Agent
         endpoint = "/api/bedrock-agent";
         body = {
-          input: payload,   // plain text
+          input: payload,
           sessionId,
-          mode              // "retrieve"
+          mode
         };
       } else {
         // 🚐 Booking Agent (Converse + tools)
+        // ✅ CRITICAL FIX: Convert ALL messages to the format the backend expects
         endpoint = "/api/bedrock-booking-agent";
+        
+        // Convert the full message history (excluding the welcome message)
+        const conversationHistory = updatedMessages
+          .filter(m => m.id !== "welcome") // Exclude welcome message
+          .map(m => ({
+            role: m.role,
+            content: m.content
+          }));
+        
         body = {
-          messages: [
-            { role: "user", content: payload }
-          ]
+          messages: conversationHistory // Send FULL history
         };
+        
+        console.log("📤 Sending to backend:", JSON.stringify(body, null, 2));
       }
 
       const res = await fetch(endpoint, {
@@ -562,7 +575,7 @@ export default function ChatPage() {
         normalizedText.includes(normalizeText(phrase)),
       )
 
-      if (containsTrigger) {
+      if (containsTrigger && mode === "retrieve") {
         const followUpRes = await fetch("/api/bedrock-agent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
