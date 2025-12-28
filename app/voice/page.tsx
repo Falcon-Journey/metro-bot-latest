@@ -2,11 +2,10 @@
 
 import { useState } from "react"
 import VoiceModeUI from "@/components/voice-mode-ui"
-import { Button } from "@/components/ui/button"
 
 export default function VoicePage() {
   const [isVoiceMode, setIsVoiceMode] = useState(true)
-  const [mode, setMode] = useState<"booking" | "retrieve">("booking")
+  const mode: "booking" = "booking"
 
   // Example suggestions
   const suggestions = [
@@ -29,15 +28,8 @@ export default function VoicePage() {
             </div>
             <div className="flex items-center gap-3">
             <div className="text-sm font-medium text-muted-foreground capitalize">
-                {mode === "booking" ? "Shuttle Booking Mode" : "Retrieve Mode"}
+                Shuttle Booking Mode
             </div>
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setMode(mode === "booking" ? "retrieve" : "booking")}
-            >
-                Switch to {mode === "booking" ? "Retrieve" : "Booking"}
-            </Button>
             </div>
         </header>
       <VoiceModeUI

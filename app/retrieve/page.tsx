@@ -3,10 +3,10 @@
 import { cn } from "@/lib/utils"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
-import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition"
 
 // ---------------- Utility functions ---------------- //
@@ -359,7 +359,7 @@ function ChatInput({
         <div className="relative flex-1">
           <Input
             aria-label="Message"
-            placeholder="Where would you like to go?"
+            placeholder="Ask about past bookings or trip details"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -428,18 +428,16 @@ function ChatInput({
 // ---------------- Quick Suggestions ---------------- //
 
 function QuickSuggestions({
-  mode,
   onPick,
   disabled,
 }: {
-  mode: "booking" | "retrieve"
   onPick: (text: string) => void
   disabled?: boolean
 }) {
-  const suggestions =
-    mode === "booking"
-      ? ["Book a ride from DC to NYC this Friday", "NYC to DC on Friday for 15 people one way leaving at 9am from Union station and arrive at 2pm at penn station"]
-      : ["What's the price for a one-way trip from NYC to DC for 15 people?", "Who arranges and pays for the driver's hotel room?"]
+  const suggestions = [
+    "What's the price for a one-way trip from NYC to DC for 15 people?",
+    "Who arranges and pays for the driver's hotel room?",
+  ]
 
   return (
     <div className="w-full">
@@ -462,16 +460,16 @@ function QuickSuggestions({
   )
 }
 
-// ---------------- Main Chat Page ---------------- //
+// ---------------- Main Retrieve Page ---------------- //
 
-export default function ChatPage() {
+export default function RetrievePage() {
   const [sessionId] = useState(createSessionId)
   const [messages, setMessages] = useState<Message[]>([
-    { id: "welcome", role: "assistant", content: "Welcome to Metropolitan Shuttle! Where would you like to go today?" },
+    { id: "welcome", role: "assistant", content: "Welcome to Trip Retrieval! Ask me about past bookings or trip details." },
   ])
   const [loading, setLoading] = useState(false)
   const [hasSentFirstMessage, setHasSentFirstMessage] = useState(false)
-  const mode: "booking" = "booking"
+  const mode: "retrieve" = "retrieve"
 
   const invisibleContext = useMemo(() => {
     if (typeof window === "undefined") return ""
@@ -507,29 +505,19 @@ export default function ChatPage() {
           ? text
           : `${invisibleContext}\n\n${text}`
 
-      // 🚐 Booking Agent (Converse + tools)
-      // ✅ CRITICAL FIX: Convert ALL messages to the format the backend expects
-      const endpoint = "/api/bedrock-booking-agent";
-      
-      // Convert the full message history (excluding the welcome message)
-      const conversationHistory = updatedMessages
-        .filter(m => m.id !== "welcome") // Exclude welcome message
-        .map(m => ({
-          role: m.role,
-          content: m.content
-        }));
-      
+      // 🔎 Retrieval Agent
+      const endpoint = "/api/bedrock-agent"
       const body = {
-        messages: conversationHistory // Send FULL history
-      };
-      
-      console.log("📤 Sending to backend:", JSON.stringify(body, null, 2));
+        input: payload,
+        sessionId,
+        mode
+      }
 
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+      })
 
       if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
       const reader = res.body.getReader()
@@ -561,6 +549,26 @@ export default function ChatPage() {
       const containsTrigger = triggerPhrases.some((phrase) =>
         normalizedText.includes(normalizeText(phrase)),
       )
+
+      if (containsTrigger) {
+        const followUpRes = await fetch("/api/bedrock-agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: "What is the estimated price for this trip?",
+            sessionId,
+            mode,
+          }),
+        })
+
+        if (followUpRes.ok) {
+          const followUpData = sanitizeAssistantOutput(await followUpRes.text())
+          setMessages((prev) => [
+            ...prev,
+            { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
+          ])
+        }
+      }
     } catch (e) {
       console.error("❌ Chat error:", e)
       setMessages((m) => [
@@ -588,7 +596,7 @@ export default function ChatPage() {
         </div>
         <div className="flex items-center gap-3">
           <div className="text-sm font-medium text-muted-foreground capitalize">
-            Shuttle Booking Mode
+            Retrieve Mode
           </div>
         </div>
       </header>
@@ -597,10 +605,10 @@ export default function ChatPage() {
       <section className="flex-1 bg-secondary">
         <div className="mx-auto flex h-full max-w-4xl flex-col px-4 py-6 md:px-6 md:py-8">
           <h1 className="text-pretty text-xl font-semibold text-foreground md:text-2xl">
-            Shuttle Booking Assistant
+            Trip Retrieval Assistant
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Let us help you book your shuttle!
+            Ask about past bookings or trip details.
           </p>
 
           <div className="mt-6 flex-1 overflow-y-auto">
@@ -613,7 +621,7 @@ export default function ChatPage() {
       <footer className="border-t bg-background">
         <div className="mx-auto w-full max-w-4xl px-4 py-5 md:px-6 md:py-7">
           <div className="mb-3 md:mb-4">
-            <QuickSuggestions mode="booking" onPick={(t) => send(t)} disabled={loading} />
+            <QuickSuggestions onPick={(t) => send(t)} disabled={loading} />
           </div>
           <div className="pb-6 md:pb-6">
             <ChatInput onSend={send} disabled={loading} />
@@ -623,3 +631,4 @@ export default function ChatPage() {
     </main>
   )
 }
+
