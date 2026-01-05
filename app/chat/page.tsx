@@ -228,7 +228,14 @@ function MarkdownRenderer({ content }: { content: string }) {
     }
 
     const headerRow = parseRow(rows[0])
-    const isSeparator = (row: string) => row.match(/^\|[\s\-:]+\|$/)
+    const isSeparator = (row: string) => {
+      const cells = row
+        .split("|")
+        .slice(1, -1)
+        .map(c => c.trim())
+    
+      return cells.every(c => /^[-:]+$/.test(c))
+    }
     const dataRows = rows.slice(1).filter((r) => !isSeparator(r))
 
     return (
