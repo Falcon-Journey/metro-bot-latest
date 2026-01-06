@@ -345,38 +345,48 @@ function MessageList({
   
   useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, loading])
   
-  // Detect phone numbers in user messages and find the next assistant message to show consent checkbox
+  // Detect phone numbers and show checkbox immediately after phone number is shared
   useEffect(() => {
     // Find the most recent user message with a phone number
-    let foundPhone: string | null = null
-    let userMessageIndex = -1
+    let phoneNumberValue: string | null = null
     
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
       if (msg.role === "user") {
         const phone = extractPhoneNumber(msg.content)
         if (phone) {
-          foundPhone = phone
-          userMessageIndex = i
+          phoneNumberValue = phone
           break
         }
       }
     }
     
-    if (foundPhone && foundPhone !== phoneNumberDetected) {
-      setPhoneNumberDetected(foundPhone)
+    // Update detected phone number and reset consent
+    if (phoneNumberValue && phoneNumberValue !== phoneNumberDetected) {
+      setPhoneNumberDetected(phoneNumberValue)
       setConsentSubmitted(false)
-      
-      // Find the next assistant message after the phone number was provided
-      // Show checkbox on the first assistant response after phone number is detected
-      for (let i = userMessageIndex + 1; i < messages.length; i++) {
-        if (messages[i].role === "assistant") {
+      // Immediately find the most recent assistant message to show checkbox
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant" && messages[i].id !== "welcome") {
           setAssistantMessageIdForConsent(messages[i].id)
           break
         }
       }
     }
-  }, [messages, phoneNumberDetected])
+    
+    // Keep updating to the latest assistant message if phone number is detected
+    if (phoneNumberDetected && !consentSubmitted) {
+      // Find the most recent assistant message
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant" && messages[i].id !== "welcome") {
+          if (messages[i].id !== assistantMessageIdForConsent) {
+            setAssistantMessageIdForConsent(messages[i].id)
+          }
+          break
+        }
+      }
+    }
+  }, [messages, phoneNumberDetected, consentSubmitted, assistantMessageIdForConsent])
   
   const handleConsentChange = (consented: boolean) => {
     if (phoneNumberDetected && onSMSConsent && !consentSubmitted) {
