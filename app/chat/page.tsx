@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition"
 
 // ---------------- Utility functions ---------------- //
@@ -32,6 +33,16 @@ function normalizeText(text: string) {
 
 function sanitizeAssistantOutput(text: string) {
   return text.replace(/<\/sources>/gi, "")
+}
+
+// Extract phone number from text
+function extractPhoneNumber(text: string): string | null {
+  const phoneMatch = text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
+  if (phoneMatch) {
+    const digits = phoneMatch[2] + phoneMatch[3] + phoneMatch[4];
+    return digits.length === 10 ? digits : phoneMatch[0];
+  }
+  return null;
 }
 
 // ---------------- Markdown Renderer ---------------- //
@@ -228,15 +239,27 @@ function MarkdownRenderer({ content }: { content: string }) {
     }
 
     const headerRow = parseRow(rows[0])
-    const isSeparator = (row: string) => {
+    const isGarbageRow = (row: string) => {
       const cells = row
         .split("|")
         .slice(1, -1)
         .map(c => c.trim())
     
-      return cells.every(c => /^[-:]+$/.test(c))
+      // Remove rows where ALL cells:
+      // - are empty OR
+      // - contain only non-alphanumeric characters (----, ___, etc.)
+      return cells.every(c => !/[a-zA-Z0-9]/.test(c))
     }
-    const dataRows = rows.slice(1).filter((r) => !isSeparator(r))
+    
+    const dataRows = rows
+      .slice(1)
+      .map(parseRow)
+      .filter((cells) => {
+        // Drop rows that contain NO meaningful data
+        // (only dashes, empty, or repeated symbols)
+        return cells.some(cell => /[a-zA-Z0-9]/.test(cell))
+      })
+
 
     return (
       <div key={key} className="mb-4 overflow-x-auto">
@@ -251,15 +274,16 @@ function MarkdownRenderer({ content }: { content: string }) {
             </tr>
           </thead>
           <tbody>
-            {dataRows.map((row, i) => (
-              <tr key={i} className="border-b border-border last:border-0 hover:bg-accent/30">
-                {parseRow(row).map((cell, j) => (
-                  <td key={j} className="px-4 py-2">
-                    {parseInlineFormatting(cell)}
-                  </td>
-                ))}
-              </tr>
-            ))}
+          {dataRows.map((cells, i) => (
+            <tr key={i} className="border-b border-border last:border-0 hover:bg-accent/30">
+              {cells.map((cell, j) => (
+                <td key={j} className="px-4 py-2">
+                  {parseInlineFormatting(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+
           </tbody>
         </table>
       </div>
@@ -269,35 +293,136 @@ function MarkdownRenderer({ content }: { content: string }) {
   return <div className="markdown-content">{renderContent()}</div>
 }
 
+// ---------------- SMS Consent Checkbox ---------------- //
+
+function SMSConsentCheckbox({ 
+  onConsentChange, 
+  phoneNumber 
+}: { 
+  onConsentChange: (consented: boolean) => void
+  phoneNumber: string 
+}) {
+  const [checked, setChecked] = useState(false)
+
+  const handleChange = (newChecked: boolean) => {
+    setChecked(newChecked)
+    onConsentChange(newChecked)
+  }
+
+  return (
+    <div className="mt-3 flex items-start gap-2 rounded-md border border-border bg-background/50 p-3">
+      <Checkbox
+        id={`sms-consent-${phoneNumber}`}
+        checked={checked}
+        onCheckedChange={handleChange}
+        className="mt-0.5"
+      />
+      <label
+        htmlFor={`sms-consent-${phoneNumber}`}
+        className="cursor-pointer text-sm leading-relaxed text-foreground"
+      >
+        Yes, send me text updates. By checking this box, I agree to receive recurring automated promotional and personalized marketing text messages from Metropolitan Shuttle.
+      </label>
+    </div>
+  )
+}
+
 // ---------------- MessageList ---------------- //
 
-function MessageList({ messages, loading }: { messages: Message[]; loading?: boolean }) {
+function MessageList({ 
+  messages, 
+  loading, 
+  onSMSConsent 
+}: { 
+  messages: Message[]
+  loading?: boolean
+  onSMSConsent?: (consented: boolean, phoneNumber: string) => void
+}) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const [phoneNumberDetected, setPhoneNumberDetected] = useState<string | null>(null)
+  const [assistantMessageIdForConsent, setAssistantMessageIdForConsent] = useState<string | null>(null)
+  const [consentSubmitted, setConsentSubmitted] = useState(false)
+  
   useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, loading])
+  
+  // Detect phone numbers in user messages and find the next assistant message to show consent checkbox
+  useEffect(() => {
+    // Find the most recent user message with a phone number
+    let foundPhone: string | null = null
+    let userMessageIndex = -1
+    
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role === "user") {
+        const phone = extractPhoneNumber(msg.content)
+        if (phone) {
+          foundPhone = phone
+          userMessageIndex = i
+          break
+        }
+      }
+    }
+    
+    if (foundPhone && foundPhone !== phoneNumberDetected) {
+      setPhoneNumberDetected(foundPhone)
+      setConsentSubmitted(false)
+      
+      // Find the next assistant message after the phone number was provided
+      // Show checkbox on the first assistant response after phone number is detected
+      for (let i = userMessageIndex + 1; i < messages.length; i++) {
+        if (messages[i].role === "assistant") {
+          setAssistantMessageIdForConsent(messages[i].id)
+          break
+        }
+      }
+    }
+  }, [messages, phoneNumberDetected])
+  
+  const handleConsentChange = (consented: boolean) => {
+    if (phoneNumberDetected && onSMSConsent && !consentSubmitted) {
+      setConsentSubmitted(true)
+      onSMSConsent(consented, phoneNumberDetected)
+    }
+  }
+  
   return (
     <div className="flex flex-col gap-4">
-      {messages.map((m) => (
-        <div key={m.id} className={cn("flex items-start gap-3", m.role === "user" ? "justify-end" : "justify-start")}>
-          {m.role === "assistant" && (
-            <Avatar className="size-8 shrink-0">
-              <AvatarFallback className="bg-accent text-accent-foreground">MS</AvatarFallback>
-            </Avatar>
-          )}
-          <div
-            className={cn(
-              "max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed",
-              m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+      {messages.map((m) => {
+        const showConsentCheckbox = 
+          m.role === "assistant" && 
+          m.id === assistantMessageIdForConsent && 
+          phoneNumberDetected && 
+          !consentSubmitted
+        
+        return (
+          <div key={m.id} className={cn("flex items-start gap-3", m.role === "user" ? "justify-end" : "justify-start")}>
+            {m.role === "assistant" && (
+              <Avatar className="size-8 shrink-0">
+                <AvatarFallback className="bg-accent text-accent-foreground">MS</AvatarFallback>
+              </Avatar>
             )}
-          >
-            {m.role === "assistant" ? <MarkdownRenderer content={m.content} /> : m.content}
+            <div
+              className={cn(
+                "max-w-[85%] rounded-lg px-4 py-3 text-sm leading-relaxed",
+                m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+              )}
+            >
+              {m.role === "assistant" ? <MarkdownRenderer content={m.content} /> : m.content}
+              {showConsentCheckbox && (
+                <SMSConsentCheckbox 
+                  phoneNumber={phoneNumberDetected!} 
+                  onConsentChange={handleConsentChange}
+                />
+              )}
+            </div>
+            {m.role === "user" && (
+              <Avatar className="size-8 shrink-0">
+                <AvatarFallback>U</AvatarFallback>
+              </Avatar>
+            )}
           </div>
-          {m.role === "user" && (
-            <Avatar className="size-8 shrink-0">
-              <AvatarFallback>U</AvatarFallback>
-            </Avatar>
-          )}
-        </div>
-      ))}
+        )
+      })}
       {loading && (
         <div className="flex items-start gap-3 justify-start">
           <Avatar className="size-8 shrink-0">
@@ -497,6 +622,11 @@ export default function ChatPage() {
     "finding price estimates",
   ]
 
+  const handleSMSConsent = async (consented: boolean, phoneNumber: string) => {
+    const consentText = consented ? "yes" : "no"
+    await send(consentText)
+  }
+
   const send = async (text: string) => {
     if (loading) return
     const userMsg: Message = { id: `${Date.now()}-u`, role: "user", content: text }
@@ -611,7 +741,7 @@ export default function ChatPage() {
           </p>
 
           <div className="mt-6 flex-1 overflow-y-auto">
-            <MessageList messages={messages} loading={loading} />
+            <MessageList messages={messages} loading={loading} onSMSConsent={handleSMSConsent} />
           </div>
         </div>
       </section>

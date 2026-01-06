@@ -31,6 +31,8 @@ function extractBookingState(messages: Message[]): any {
   const state: any = {
     name: null,
     email: null,
+    phone: null,
+    sms_consent: null,
     group_size_category: null,
     num_passengers: null,
     pickup_location: null,
@@ -111,6 +113,26 @@ function extractBookingState(messages: Message[]): any {
             const nameMatch = text.match(/(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
             if (nameMatch) state.name = nameMatch[1];
           }
+          
+          // Extract phone number - matches various formats
+          if (!state.phone) {
+            // Match phone numbers: (123) 456-7890, 123-456-7890, 123.456.7890, 1234567890, +1 123 456 7890
+            const phoneMatch = block.text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
+            if (phoneMatch) {
+              // Normalize phone number
+              const digits = phoneMatch[2] + phoneMatch[3] + phoneMatch[4];
+              state.phone = digits.length === 10 ? digits : block.text.match(/\d{10,}/)?.[0] || phoneMatch[0];
+            }
+          }
+          
+          // Extract SMS consent - check for explicit consent messages
+          if (state.phone && state.sms_consent === null) {
+            if (text.includes('yes') && (text.includes('text') || text.includes('sms') || text.includes('message'))) {
+              state.sms_consent = true;
+            } else if (text.includes('no') && (text.includes('text') || text.includes('sms') || text.includes('message'))) {
+              state.sms_consent = false;
+            }
+          }
         }
       }
     }
@@ -124,6 +146,7 @@ function getMissingFields(state: any): string[] {
   
   if (!state.name) missing.push('name');
   if (!state.email) missing.push('email');
+  if (!state.phone) missing.push('phone number');
   if (!state.group_size_category) missing.push('group size');
   if (!state.pickup_location || state.pickup_location.length < 5) missing.push('specific pickup location');
   if (!state.dropoff_location || state.dropoff_location.length < 5) missing.push('specific dropoff location');
@@ -180,12 +203,20 @@ TRIP DIRECTION:
 REQUIRED FIELDS:
 - name
 - email
+- phone (phone number is required)
 - group_size_category (small/medium/large)
 - pickup_location (full address or exact spot)
 - dropoff_location (full address or exact spot)
 - service_date
 - trip_direction (infer "one-way" if not specified as return)
 - If return trip: return_date, return_time
+
+PHONE NUMBER AND SMS CONSENT:
+- Always ask for phone number as it is required for booking
+- After the user provides their phone number, acknowledge it and continue with the booking flow
+- The SMS consent checkbox will appear automatically in the chat interface - you don't need to mention it
+- When user responds with "yes" or "no" (which indicates their SMS consent choice), interpret it as their consent preference
+- Include sms_consent field in the booking (true for "yes", false for "no")
 
 EXAMPLES OF CORRECT BEHAVIOR:
 
@@ -208,7 +239,7 @@ Assistant: "Perfect! 10 passengers (medium group). I have:
 ✓ Date: This Friday (December 12, 2025)
 ✓ Trip type: One-way
 
-I understand you'll confirm exact locations later with the agency. To complete your booking, I just need your name and email address."
+I understand you'll confirm exact locations later with the agency. To complete your booking, I just need your name, email address, and phone number."
 
 Example 2 - Bad (Asks for already provided info):
 User: "Book a ride from DC to NYC this Friday"
@@ -223,7 +254,7 @@ Assistant: "Excellent! I have everything for your DC to NYC trip on Friday, Dece
 ✓ Date: Friday, December 12, 2025
 ✓ One-way trip
 
-To complete your booking, I just need your name and email address."
+To complete your booking, I just need your name, email address, and phone number."
 
 STYLE:
 - Be concise, helpful, and conversational.
@@ -258,7 +289,8 @@ const TOOLS: Tool[] = [
           properties: {
             name: { type: "string", description: "Customer full name" },
             email: { type: "string", description: "Customer email" },
-            phone: { type: "string", description: "Customer phone (optional)" },
+            phone: { type: "string", description: "Customer phone number (required)" },
+            sms_consent: { type: "boolean", description: "Customer consent to receive SMS updates (true/false)" },
             group_size_category: { type: "string", description: "small, medium, or large" },
             num_passengers: { type: "number", description: "Exact passenger count (optional)" },
             pickup_location: { type: "string", description: "Pickup address/location" },
@@ -271,7 +303,7 @@ const TOOLS: Tool[] = [
             vehicle_type: { type: "string", description: "Vehicle preference (optional)" },
             additional_info: { type: "string", description: "Extra notes (optional)" }
           },
-          required: ["name", "email", "group_size_category", "pickup_location", "dropoff_location", "service_date", "trip_direction"]
+          required: ["name", "email", "phone", "group_size_category", "pickup_location", "dropoff_location", "service_date", "trip_direction"]
         }
       } as ToolInputSchema
     }
