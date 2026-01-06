@@ -678,45 +678,89 @@ export default function ChatPage() {
         body: JSON.stringify(body),
       });
 
-      if (!res.ok || !res.body) throw new Error(`Request failed: ${res.status}`)
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "Unknown error")
+        throw new Error(`Request failed: ${res.status} - ${errorText}`)
+      }
+      
+      if (!res.body) {
+        throw new Error("No response body received from server")
+      }
+      
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let fullText = ""
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        fullText += chunk
-        setMessages((prev) => {
-          const hasMsg = prev.some((m) => m.id === msgId)
-          if (!hasMsg) {
-            return [...prev, { id: msgId, role: "assistant", content: chunk }]
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          if (value) {
+            const chunk = decoder.decode(value, { stream: true })
+            fullText += chunk
+            setMessages((prev) => {
+              const hasMsg = prev.some((m) => m.id === msgId)
+              if (!hasMsg) {
+                return [...prev, { id: msgId, role: "assistant", content: chunk }]
+              }
+              return prev.map((m) =>
+                m.id === msgId ? { ...m, content: fullText } : m,
+              )
+            })
           }
-          return prev.map((m) =>
-            m.id === msgId ? { ...m, content: fullText } : m,
+        }
+
+        fullText = sanitizeAssistantOutput(fullText)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
+        )
+      } catch (streamError) {
+        // If we got some text before the stream error, use it
+        if (fullText.trim()) {
+          fullText = sanitizeAssistantOutput(fullText)
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
           )
-        })
+        } else {
+          throw streamError
+        }
       }
 
-      fullText = sanitizeAssistantOutput(fullText)
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
-      )
-
-      const normalizedText = normalizeText(fullText)
-      const containsTrigger = triggerPhrases.some((phrase) =>
-        normalizedText.includes(normalizeText(phrase)),
-      )
+      // Commented out pricing check after booking save
+        // const normalizedText = normalizeText(fullText)
+        // const containsTrigger = triggerPhrases.some((phrase) =>
+        //   normalizedText.includes(normalizeText(phrase)),
+        // )
+        // if (containsTrigger) {
+        //   // Pricing follow-up logic would go here
+        // }
     } catch (e) {
       console.error("❌ Chat error:", e)
+      
+      // Determine error type and show appropriate message
+      let errorMessage = "I'm having trouble connecting right now. Please try again in a moment."
+      
+      if (e instanceof TypeError && e.message.includes("fetch")) {
+        errorMessage = "I'm having trouble connecting to the server. Please check your internet connection and try again."
+      } else if (e instanceof Error) {
+        if (e.message.includes("404") || e.message.includes("Not Found")) {
+          errorMessage = "The service is temporarily unavailable. Please try again in a moment."
+        } else if (e.message.includes("500") || e.message.includes("Internal Server Error")) {
+          errorMessage = "Something went wrong on our end. Please try again, and if the problem persists, contact support."
+        } else if (e.message.includes("timeout") || e.message.includes("Timeout")) {
+          errorMessage = "The request took too long. Please try again."
+        } else if (e.message.includes("Failed to fetch")) {
+          errorMessage = "Unable to connect. Please check your connection and try again."
+        }
+      }
+      
       setMessages((m) => [
         ...m,
         {
           id: `${Date.now()}-e`,
           role: "assistant",
-          content:
-            "Sorry, I couldn't reach the agent. Verify env vars and AWS configuration.",
+          content: errorMessage,
         },
       ])
     } finally {

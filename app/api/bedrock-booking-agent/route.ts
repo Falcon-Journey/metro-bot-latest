@@ -189,7 +189,7 @@ BOOKING FLOW:
 3. For return trips, also collect return date/time.
 4. Collect name and email near the end.
 5. When all required fields are collected, call save_booking.
-6. After saving, offer pricing help if not already asked.
+6. After saving, confirm the booking is complete. (Pricing check after save is temporarily disabled)
 
 DATE HANDLING:
 - If user says "this Friday," "next Tuesday," "December 12," etc., that IS the service_date.
