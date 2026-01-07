@@ -35,14 +35,100 @@ function sanitizeAssistantOutput(text: string) {
   return text.replace(/<\/sources>/gi, "")
 }
 
-// Extract phone number from text
+// Extract phone number from text - handles 8-10 digit numbers
 function extractPhoneNumber(text: string): string | null {
-  const phoneMatch = text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
-  if (phoneMatch) {
-    const digits = phoneMatch[2] + phoneMatch[3] + phoneMatch[4];
-    return digits.length === 10 ? digits : phoneMatch[0];
+  // First try standard format: (123) 456-7890, 123-456-7890, etc.
+  const standardMatch = text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
+  if (standardMatch) {
+    const digits = standardMatch[2] + standardMatch[3] + standardMatch[4];
+    if (digits.length === 10) return digits;
   }
+  
+  // Also match any sequence of 8-10 digits (for numbers like 766823932)
+  const digitSequence = text.match(/\b(\d{8,10})\b/);
+  if (digitSequence) {
+    const digits = digitSequence[1];
+    // Exclude if it's part of a date, year, or other common number patterns
+    if (digits.length >= 8 && digits.length <= 10) {
+      // Don't match if it looks like a year (1900-2099)
+      if (digits.length === 4 && parseInt(digits) >= 1900 && parseInt(digits) <= 2099) {
+        return null;
+      }
+      return digits;
+    }
+  }
+  
   return null;
+}
+
+// Extract booking details from conversation messages
+function extractBookingDetails(messages: Message[]): {
+  num_passengers?: number
+  pickup_location?: string
+  dropoff_location?: string
+  trip_direction?: string
+} {
+  const details: any = {}
+  
+  // Look through messages to extract booking info
+  for (const msg of messages) {
+    const content = msg.content.toLowerCase()
+    
+    // Extract passenger count
+    if (!details.num_passengers) {
+      const passengerMatch = content.match(/(\d+)\s*(people|passengers?|persons?|pax)/);
+      if (passengerMatch) {
+        details.num_passengers = parseInt(passengerMatch[1]);
+      }
+    }
+    
+    // Extract pickup and dropoff locations
+    if (!details.pickup_location || !details.dropoff_location) {
+      const fromToMatch = content.match(/from\s+([^to]+)\s+to\s+(.+?)(?:\s+this|\s+on|\s+for|\s+\d|$)/i);
+      if (fromToMatch) {
+        if (!details.pickup_location) details.pickup_location = fromToMatch[1].trim();
+        if (!details.dropoff_location) details.dropoff_location = fromToMatch[2].trim();
+      }
+    }
+    
+    // Extract trip direction
+    if (!details.trip_direction) {
+      if (content.includes('round trip') || content.includes('return')) {
+        details.trip_direction = 'return';
+      } else if (content.includes('one-way') || content.includes('one way')) {
+        details.trip_direction = 'one-way';
+      }
+    }
+  }
+  
+  return details;
+}
+
+// Check if booking is completed
+function isBookingCompleted(text: string): boolean {
+  const normalized = normalizeText(text);
+  const completionPhrases = [
+    'booking saved',
+    'booking confirmed',
+    'booking has been logged',
+    'booking has been successfully saved',
+    'booking has been',
+    'booking is confirmed',
+    'all set',
+    'your booking has been saved',
+    'booking saved successfully',
+    'saved successfully',
+    'booking complete',
+    'booking is complete',
+    'your booking is complete',
+    'i\'ll save your booking',
+    'saving your booking',
+    'booking has been submitted',
+    'successfully saved',
+    'your trip has been booked',
+    'trip has been booked'
+  ];
+  return completionPhrases.some(phrase => normalized.includes(phrase));
 }
 
 // ---------------- Markdown Renderer ---------------- //
@@ -327,15 +413,39 @@ function SMSConsentCheckbox({
   )
 }
 
+// ---------------- Pricing Loading Component ---------------- //
+
+function PricingLoadingMessage() {
+  return (
+    <div className="flex items-start gap-3 justify-start">
+      <Avatar className="size-8 shrink-0">
+        <AvatarFallback className="bg-accent text-accent-foreground">MS</AvatarFallback>
+      </Avatar>
+      <div className="max-w-[85%] rounded-lg bg-muted px-4 py-3 text-foreground">
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            <div className="h-2 w-2 rounded-full bg-primary animate-pulse [animation-delay:0ms]"></div>
+            <div className="h-2 w-2 rounded-full bg-primary animate-pulse [animation-delay:150ms]"></div>
+            <div className="h-2 w-2 rounded-full bg-primary animate-pulse [animation-delay:300ms]"></div>
+          </div>
+          <span className="text-sm text-muted-foreground">I'm fetching an estimated cost for your trip based on similar bookings...</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---------------- MessageList ---------------- //
 
 function MessageList({ 
   messages, 
   loading, 
+  fetchingPricing,
   onSMSConsent 
 }: { 
   messages: Message[]
   loading?: boolean
+  fetchingPricing?: boolean
   onSMSConsent?: (consented: boolean, phoneNumber: string) => void
 }) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -447,6 +557,7 @@ function MessageList({
           </div>
         </div>
       )}
+      {fetchingPricing && <PricingLoadingMessage />}
       <div ref={bottomRef} />
     </div>
   )
@@ -612,8 +723,29 @@ export default function ChatPage() {
     { id: "welcome", role: "assistant", content: "Welcome to Metropolitan Shuttle! Where would you like to go today?" },
   ])
   const [loading, setLoading] = useState(false)
+  const [fetchingPricing, setFetchingPricing] = useState(false)
   const [hasSentFirstMessage, setHasSentFirstMessage] = useState(false)
+  const [bookingCompleted, setBookingCompleted] = useState(false)
   const mode: "booking" = "booking"
+
+  // Monitor messages for booking completion
+  useEffect(() => {
+    if (bookingCompleted || loading || fetchingPricing) return
+    
+    // Check all assistant messages for booking completion
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg.role === "assistant" && msg.id !== "welcome" && isBookingCompleted(msg.content)) {
+        setBookingCompleted(true)
+        // Use setTimeout to avoid dependency issues
+        setTimeout(() => {
+          fetchPricingEstimate(messages)
+        }, 100)
+        break
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, bookingCompleted, loading, fetchingPricing])
 
   const invisibleContext = useMemo(() => {
     if (typeof window === "undefined") return ""
@@ -635,6 +767,85 @@ export default function ChatPage() {
   const handleSMSConsent = async (consented: boolean, phoneNumber: string) => {
     const consentText = consented ? "yes" : "no"
     await send(consentText)
+  }
+
+  const fetchPricingEstimate = async (conversationMessages: Message[]) => {
+    try {
+      setFetchingPricing(true)
+      
+      // Note: Loading UI is handled by fetchingPricing state, no need for message
+
+      // Extract booking details
+      const bookingDetails = extractBookingDetails(conversationMessages)
+      
+      // Build pricing query
+      const queryParts: string[] = []
+      if (bookingDetails.num_passengers) {
+        queryParts.push(`${bookingDetails.num_passengers} passengers`)
+      }
+      if (bookingDetails.pickup_location) {
+        queryParts.push(`from ${bookingDetails.pickup_location}`)
+      }
+      if (bookingDetails.dropoff_location) {
+        queryParts.push(`to ${bookingDetails.dropoff_location}`)
+      }
+      if (bookingDetails.trip_direction) {
+        queryParts.push(bookingDetails.trip_direction)
+      }
+      
+      const pricingQuery = queryParts.length > 0 
+        ? `What is the estimated price for a trip with ${queryParts.join(', ')}?`
+        : "What is the estimated price for this trip?"
+
+      // Call retrieve agent
+      const res = await fetch("/api/bedrock-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: pricingQuery,
+          sessionId: `${sessionId}-pricing`,
+          mode: "retrieve",
+        }),
+      })
+
+      if (!res.ok || !res.body) {
+        throw new Error(`Pricing request failed: ${res.status}`)
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let pricingText = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value) {
+          pricingText += decoder.decode(value, { stream: true })
+        }
+      }
+
+      // Add pricing result
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-pricing`,
+          role: "assistant",
+          content: pricingText || "I couldn't find pricing information for similar trips at this time.",
+        },
+      ])
+    } catch (error) {
+      console.error("❌ Pricing fetch error:", error)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-pricing-error`,
+          role: "assistant",
+          content: "I had trouble fetching the price estimate. Our sales team will provide you with a detailed quote soon.",
+        },
+      ])
+    } finally {
+      setFetchingPricing(false)
+    }
   }
 
   const send = async (text: string) => {
@@ -715,6 +926,12 @@ export default function ChatPage() {
         setMessages((prev) =>
           prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
         )
+
+        // Check if booking is completed and fetch pricing
+        if (isBookingCompleted(fullText) && !bookingCompleted) {
+          setBookingCompleted(true)
+          fetchPricingEstimate(updatedMessages)
+        }
       } catch (streamError) {
         // If we got some text before the stream error, use it
         if (fullText.trim()) {
@@ -722,12 +939,16 @@ export default function ChatPage() {
           setMessages((prev) =>
             prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
           )
+          
+          // Check if booking is completed even after stream error
+          if (isBookingCompleted(fullText) && !bookingCompleted) {
+            setBookingCompleted(true)
+            fetchPricingEstimate(updatedMessages)
+          }
         } else {
           throw streamError
         }
       }
-
-      // Commented out pricing check after booking save
         // const normalizedText = normalizeText(fullText)
         // const containsTrigger = triggerPhrases.some((phrase) =>
         //   normalizedText.includes(normalizeText(phrase)),
@@ -795,7 +1016,7 @@ export default function ChatPage() {
           </p>
 
           <div className="mt-6 flex-1 overflow-y-auto">
-            <MessageList messages={messages} loading={loading} onSMSConsent={handleSMSConsent} />
+            <MessageList messages={messages} loading={loading} fetchingPricing={fetchingPricing} onSMSConsent={handleSMSConsent} />
           </div>
         </div>
       </section>

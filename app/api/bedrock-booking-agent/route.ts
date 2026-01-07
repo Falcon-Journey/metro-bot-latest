@@ -114,22 +114,47 @@ function extractBookingState(messages: Message[]): any {
             if (nameMatch) state.name = nameMatch[1];
           }
           
-          // Extract phone number - matches various formats
+          // Extract phone number - matches various formats including 8-10 digit numbers
           if (!state.phone) {
-            // Match phone numbers: (123) 456-7890, 123-456-7890, 123.456.7890, 1234567890, +1 123 456 7890
-            const phoneMatch = block.text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
-            if (phoneMatch) {
-              // Normalize phone number
-              const digits = phoneMatch[2] + phoneMatch[3] + phoneMatch[4];
-              state.phone = digits.length === 10 ? digits : block.text.match(/\d{10,}/)?.[0] || phoneMatch[0];
+            // First try standard format: (123) 456-7890, 123-456-7890, etc.
+            const standardMatch = block.text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/);
+            if (standardMatch) {
+              const digits = standardMatch[2] + standardMatch[3] + standardMatch[4];
+              if (digits.length === 10) {
+                state.phone = digits;
+              }
+            }
+            
+            // Also match any sequence of 8-10 digits (for numbers like 766823932)
+            if (!state.phone) {
+              const digitSequence = block.text.match(/\b(\d{8,10})\b/);
+              if (digitSequence) {
+                const digits = digitSequence[1];
+                // Exclude if it's part of a date, year, or other common number patterns
+                if (digits.length >= 8 && digits.length <= 10) {
+                  // Don't match if it looks like a year (1900-2099)
+                  if (!(digits.length === 4 && parseInt(digits) >= 1900 && parseInt(digits) <= 2099)) {
+                    state.phone = digits;
+                  }
+                }
+              }
             }
           }
           
           // Extract SMS consent - check for explicit consent messages
+          // If user just says "yes" or "no" after phone number is provided, treat as SMS consent
           if (state.phone && state.sms_consent === null) {
+            // Check for explicit consent with keywords
             if (text.includes('yes') && (text.includes('text') || text.includes('sms') || text.includes('message'))) {
               state.sms_consent = true;
             } else if (text.includes('no') && (text.includes('text') || text.includes('sms') || text.includes('message'))) {
+              state.sms_consent = false;
+            } 
+            // Check for simple yes/no responses (likely SMS consent if phone is already provided)
+            // Only set if it's a short response (just "yes" or "no" or very short)
+            else if (block.text.trim().toLowerCase() === 'yes' || block.text.trim().toLowerCase() === 'y') {
+              state.sms_consent = true;
+            } else if (block.text.trim().toLowerCase() === 'no' || block.text.trim().toLowerCase() === 'n') {
               state.sms_consent = false;
             }
           }
