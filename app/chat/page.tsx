@@ -122,13 +122,240 @@ function isBookingCompleted(text: string): boolean {
     'booking is complete',
     'your booking is complete',
     'i\'ll save your booking',
-    'saving your booking',
     'booking has been submitted',
     'successfully saved',
     'your trip has been booked',
     'trip has been booked'
   ];
   return completionPhrases.some(phrase => normalized.includes(phrase));
+}
+
+// Extract price from retrieve mode answer - returns text up to and including the price
+function extractPriceFromAnswer(text: string): string {
+  // More comprehensive price patterns to match various formats:
+  // - $1,234.56, $1234.56, $1,234, $1234
+  // - USD 1,234.56, USD$1,234.56
+  // - 1,234.56 dollars, 1234 dollars
+  // - prices with ranges: $1,000-$2,000
+  const pricePatterns = [
+    /\$[\d,]+(?:\.\d{2})?/,  // $1,234.56 or $1234.56
+    /USD\s*\$?[\d,]+(?:\.\d{2})?/i,  // USD $1,234 or USD$1,234
+    /[\d,]+(?:\.\d{2})?\s*(?:dollars?|USD)/i,  // 1,234.56 dollars
+    /\$[\d,]+(?:\.\d{2})?\s*-\s*\$[\d,]+(?:\.\d{2})?/,  // $1,000-$2,000
+    /\$[\d,]+(?:\.\d{2})?\s*to\s*\$[\d,]+(?:\.\d{2})?/i,  // $1,000 to $2,000
+  ];
+  
+  let priceMatch: RegExpMatchArray | null = null;
+  let priceIndex = -1;
+  
+  // Try each pattern to find the first price
+  for (const pattern of pricePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const index = text.indexOf(match[0]);
+      if (priceIndex === -1 || index < priceIndex) {
+        priceMatch = match;
+        priceIndex = index;
+      }
+    }
+  }
+  
+  // If no price found with patterns, look for price-related keywords and extract surrounding text
+  if (!priceMatch) {
+    const priceKeywords = [
+      /(?:estimated?\s+)?(?:price|cost|rate|fee|charge)(?:\s+is|\s+of|\s+for)?\s*:?\s*\$?[\d,]+(?:\.\d{2})?/i,
+      /\$?[\d,]+(?:\.\d{2})?\s*(?:per\s+)?(?:person|trip|ride|booking|passenger)/i,
+    ];
+    
+    for (const keywordPattern of priceKeywords) {
+      const match = text.match(keywordPattern);
+      if (match) {
+        priceMatch = match;
+        priceIndex = text.indexOf(match[0]);
+        break;
+      }
+    }
+  }
+  
+  // If still no price found, look for price-related keywords and extract surrounding text
+  if (!priceMatch || priceIndex === -1) {
+    // Check if text mentions price/estimate/cost
+    const priceMentionPattern = /(?:price|estimate|cost|rate|fee|charge)/i;
+    const priceMention = text.match(priceMentionPattern);
+    
+    if (priceMention) {
+      const mentionIndex = text.indexOf(priceMention[0]);
+      // Extract text from the mention onwards, up to 500 characters or until a table
+      // This gives us more room to find the price even if it's on a new line
+      let extracted = text.substring(mentionIndex);
+      
+      // Look for tables and stop before them
+      const tableIndex = extracted.indexOf('|');
+      if (tableIndex !== -1 && tableIndex < 500) {
+        extracted = extracted.substring(0, tableIndex);
+      } else {
+        // Take up to 500 characters after the mention to ensure we capture price on next line
+        extracted = extracted.substring(0, Math.min(500, extracted.length));
+      }
+      
+      // Try to find a price in this extracted portion (including after newlines)
+      for (const pattern of pricePatterns) {
+        const match = extracted.match(pattern);
+        if (match) {
+          // Found a price! Extract up to and including it
+          const pricePos = extracted.indexOf(match[0]);
+          let result = extracted.substring(0, pricePos + match[0].length);
+          
+          // Include sentence ending if close
+          const afterPrice = extracted.substring(pricePos + match[0].length);
+          const sentenceEnd = afterPrice.match(/^[^.!?\n]{0,50}[.!?]/);
+          if (sentenceEnd) {
+            result += afterPrice.substring(0, sentenceEnd.index! + sentenceEnd[0].length);
+          }
+          
+          return result.trim();
+        }
+      }
+      
+      // No price found in extracted portion - check if text ends with colon (price might be on next line)
+      // In this case, return the full extracted text up to table
+      const lines = extracted.split('\n');
+      const cleanLines: string[] = [];
+      for (const line of lines) {
+        if (line.trim().startsWith('|')) break;
+        if (line.trim().match(/^[\|\s\-:]+$/)) break;
+        cleanLines.push(line);
+        // If we hit a line that looks like it might have a price, include a bit more
+        if (line.match(/[\d,]+/)) {
+          // This line has numbers, might be price-related, include it
+        }
+      }
+      const result = cleanLines.join('\n').trim();
+      // If result ends with colon, try to include next line if it has numbers
+      if (result.endsWith(':') && lines.length > cleanLines.length) {
+        const nextLine = lines[cleanLines.length];
+        if (nextLine && (nextLine.match(/\$[\d,]+/) || nextLine.match(/[\d,]+/))) {
+          return (result + '\n' + nextLine).trim();
+        }
+      }
+      return result;
+    }
+    
+    // No price mention found, look for tables and return text before them
+    const tableIndex = text.indexOf('|');
+    if (tableIndex !== -1) {
+      return text.substring(0, tableIndex).trim();
+    }
+    // Return first 500 characters if no table found
+    return text.substring(0, 500).trim();
+  }
+  
+  // Extract text up to and including the price
+  let extractedText = text.substring(0, priceIndex + priceMatch[0].length);
+  
+  // Check if there's a sentence ending (period, exclamation, question mark) shortly after the price
+  const afterPrice = text.substring(priceIndex + priceMatch[0].length);
+  const sentenceEndMatch = afterPrice.match(/^[^.!?\n]{0,100}[.!?]/);
+  
+  if (sentenceEndMatch) {
+    // Include the sentence ending
+    extractedText += afterPrice.substring(0, sentenceEndMatch.index! + sentenceEndMatch[0].length);
+  } else {
+    // If no sentence ending, look for a newline or stop at first table marker
+    const newlineIndex = afterPrice.indexOf('\n');
+    if (newlineIndex !== -1 && newlineIndex < 150) {
+      // Check if the next line starts a table
+      const nextLine = afterPrice.substring(newlineIndex + 1).split('\n')[0];
+      if (nextLine.trim().startsWith('|')) {
+        // Stop before the table
+        extractedText += afterPrice.substring(0, newlineIndex);
+      } else {
+        // Include up to the newline if it's close (but check if price continues on next line)
+        // If next line also has a price pattern, include it
+        const nextLinePrice = nextLine.match(/\$[\d,]+(?:\.\d{2})?/);
+        if (nextLinePrice) {
+          // Price continues on next line, include it
+          extractedText += afterPrice.substring(0, newlineIndex + 1 + nextLinePrice.index! + nextLinePrice[0].length);
+        } else {
+          // Just include up to the newline
+          extractedText += afterPrice.substring(0, newlineIndex);
+        }
+      }
+    } else if (newlineIndex === -1) {
+      // If no newline, include up to 100 characters after price
+      extractedText += afterPrice.substring(0, Math.min(100, afterPrice.length));
+    }
+  }
+  
+  // Remove any tables or markdown content that might have been included
+  const lines = extractedText.split('\n');
+  const resultLines: string[] = [];
+  
+  for (const line of lines) {
+    // Stop if we encounter a table marker
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      break;
+    }
+    // Stop if we encounter markdown table separator
+    if (line.trim().match(/^[\|\s\-:]+$/)) {
+      break;
+    }
+    resultLines.push(line);
+  }
+  
+  return resultLines.join('\n').trim();
+}
+
+// Extract booking agent pricing answer - shows full answer but cuts off at "Based on X similar historical trips:" or tables
+function extractBookingPricingAnswer(text: string): string {
+  // Look for the cutoff pattern: "Based on X similar historical trips:" where X is any number
+  const cutoffPattern = /Based on \d+ similar historical trips?:/i;
+  const cutoffMatch = text.match(cutoffPattern);
+  
+  let cutoffIndex = -1;
+  
+  if (cutoffMatch) {
+    cutoffIndex = text.indexOf(cutoffMatch[0]);
+  }
+  
+  // Also check for table markers
+  const tableIndex = text.indexOf('|');
+  
+  // Determine the earliest cutoff point
+  let finalCutoffIndex = text.length;
+  
+  if (cutoffIndex !== -1) {
+    finalCutoffIndex = Math.min(finalCutoffIndex, cutoffIndex);
+  }
+  
+  if (tableIndex !== -1) {
+    finalCutoffIndex = Math.min(finalCutoffIndex, tableIndex);
+  }
+  
+  // Extract text up to the cutoff point
+  let extracted = text.substring(0, finalCutoffIndex).trim();
+  
+  // Also check line by line to stop at the line containing the cutoff pattern
+  const lines = extracted.split('\n');
+  const resultLines: string[] = [];
+  
+  for (const line of lines) {
+    // Stop if this line contains the cutoff pattern
+    if (cutoffPattern.test(line)) {
+      break;
+    }
+    // Stop if we encounter a table marker
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      break;
+    }
+    // Stop if we encounter markdown table separator
+    if (line.trim().match(/^[\|\s\-:]+$/)) {
+      break;
+    }
+    resultLines.push(line);
+  }
+  
+  return resultLines.join('\n').trim();
 }
 
 // ---------------- Markdown Renderer ---------------- //
@@ -824,13 +1051,20 @@ export default function ChatPage() {
         }
       }
 
+      // Extract booking pricing answer (shows full answer but cuts off at "Based on X similar historical trips:" or tables)
+      const extractedPricing = extractBookingPricingAnswer(pricingText)
+      
+      // Debug: log the full response to help troubleshoot
+      console.log("📊 Full pricing response:", pricingText)
+      console.log("💰 Extracted pricing answer:", extractedPricing)
+
       // Add pricing result
       setMessages((prev) => [
         ...prev,
         {
           id: `${Date.now()}-pricing`,
           role: "assistant",
-          content: pricingText || "I couldn't find pricing information for similar trips at this time.",
+          content: extractedPricing || "I couldn't find pricing information for similar trips at this time.",
         },
       ])
     } catch (error) {
