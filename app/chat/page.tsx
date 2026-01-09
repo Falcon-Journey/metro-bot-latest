@@ -918,7 +918,7 @@ function QuickSuggestions({
 }) {
   const suggestions =
     mode === "booking"
-      ? ["Book a ride from DC to NYC this Friday", "NYC to DC on Friday for 15 people one way leaving at 9am from Union station and arrive at 2pm at penn station"]
+      ? ["Book a charter service from DC to NYC this Friday", "Book a charter service from Los Angeles to San Francisco for 20 people one way leaving at 8am"]
       : ["What's the price for a one-way trip from NYC to DC for 15 people?", "Who arranges and pays for the driver's hotel room?"]
 
   return (
@@ -947,7 +947,7 @@ function QuickSuggestions({
 export default function ChatPage() {
   const [sessionId] = useState(createSessionId)
   const [messages, setMessages] = useState<Message[]>([
-    { id: "welcome", role: "assistant", content: "Welcome to Metropolitan Shuttle! Where would you like to go today?" },
+    { id: "welcome", role: "assistant", content: "Welcome to Metropolitan Shuttle! Where would you like to go?" },
   ])
   const [loading, setLoading] = useState(false)
   const [fetchingPricing, setFetchingPricing] = useState(false)
@@ -1246,7 +1246,7 @@ export default function ChatPage() {
             Shuttle Booking Assistant
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Let us help you book your shuttle!
+            Let us help you book your charter bus!
           </p>
 
           <div className="mt-6 flex-1 overflow-y-auto">
