@@ -10,12 +10,41 @@ import {
 import { NextRequest } from "next/server";
 
 const bedrock = new BedrockRuntimeClient({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.AWS_REGION || "us-west-2",
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
   },
 });
+
+// Simple CSV line parser that handles quoted fields with commas
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      // Handle escaped quotes ("")
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current);
+  return result.map((field) => field.trim().replace(/^"|"$/g, ""));
+}
 
 function buildSystemPrompt(): string {
   return `You are a helpful assistant for Metropolitan Shuttle that helps users query vendor history and trip pricing information.
@@ -50,12 +79,16 @@ SEARCH STRATEGIES:
 
 RESPONSE FORMAT:
 - Be clear and concise
-- When listing trips, include: Trip name, Total Price, Vendor (if available), Date
-- When calculating totals, show the breakdown and sum
-- If no results found, suggest alternative search terms
+- When listing trips or pricing results, you MUST present them in a **markdown table** (not as bullet points or plain text)
+- The primary trip table should use columns like: **Trip Name**, **Created Date**, **Quote #**, **Subtotal**, **Total Price**, **Vendor ID**
+- When calculating totals, show a short text summary *after* the table (e.g., total cost, min/max/average) and, when appropriate, a separate **Vendor Breakdown** section
+- If no results are found, clearly state that and suggest alternative search terms
 
 TOOLS AVAILABLE:
-- search_vendor_history: Search the knowledge base for trip and vendor information`;
+- search_vendor_history: Search the knowledge base for trip and vendor information
+
+CRITICAL FORMAT RULE:
+- Whenever you need structured information about trips, vendors, or prices, you SHOULD call the tool \"search_vendor_history\" and then format the final answer as markdown tables as described above. Do NOT invent tables that don't align with the retrieved data.`;
 }
 
 const TOOLS: Tool[] = [
@@ -83,7 +116,7 @@ async function queryKnowledgeBase(kbId: string, query: string) {
   try {
     const { BedrockAgentRuntimeClient, RetrieveCommand } = await import("@aws-sdk/client-bedrock-agent-runtime");
     const agentRuntime = new BedrockAgentRuntimeClient({
-      region: process.env.AWS_REGION || "us-east-1",
+      region: process.env.AWS_REGION || "us-west-2",
       credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
@@ -100,15 +133,80 @@ async function queryKnowledgeBase(kbId: string, query: string) {
 
     const response = await agentRuntime.send(cmd);
     const results = response.retrievalResults || [];
+
+    console.log("🔍 Vendor KB query", {
+      kbId,
+      query,
+      resultCount: results.length,
+    });
     
     // Parse and format the results
     const formattedResults: any[] = [];
     
-    for (const result of results) {
+    for (let idx = 0; idx < results.length; idx++) {
+      const result = results[idx];
       const text = result.content?.text || "";
-      if (!text) continue;
-      
-      // Try to parse JSON from the result
+      if (!text) {
+        console.log(`📄 KB result[${idx}] has no text content`);
+        continue;
+      }
+
+      console.log(`📄 KB raw result[${idx}] (first 500 chars):`, text.slice(0, 500));
+
+      const trimmed = text.trim();
+
+      // --- CSV handling: detect and parse CSV with header row ---
+      // Header can be either quoted or unquoted
+      const isCsvHeader =
+        trimmed.startsWith("Name,CreatedDate,OpportunityId") ||
+        trimmed.startsWith('"Name","CreatedDate","OpportunityId"');
+
+      if (isCsvHeader) {
+        console.log("📑 Detected CSV format in KB result, parsing as CSV");
+        const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
+        if (lines.length > 1) {
+          const headerFields = parseCsvLine(lines[0]);
+
+          for (let li = 1; li < lines.length; li++) {
+            const rowLine = lines[li];
+            const rowFields = parseCsvLine(rowLine);
+            if (rowFields.length !== headerFields.length) {
+              console.warn(
+                `⚠️ CSV row ${li} field count (${rowFields.length}) != header count (${headerFields.length}), skipping row`
+              );
+              continue;
+            }
+
+            const record: any = {};
+            headerFields.forEach((h, idxField) => {
+              record[h] = rowFields[idxField];
+            });
+
+            // Normalize numeric fields
+            if (record.Subtotal !== undefined && record.Subtotal !== null && record.Subtotal !== "null") {
+              const n = Number(record.Subtotal);
+              record.Subtotal = isNaN(n) ? record.Subtotal : n;
+            }
+            if (record.TotalPrice !== undefined && record.TotalPrice !== null && record.TotalPrice !== "null") {
+              const n = Number(record.TotalPrice);
+              record.TotalPrice = isNaN(n) ? record.TotalPrice : n;
+            }
+
+            formattedResults.push(record);
+          }
+
+          console.log(
+            "✅ Parsed CSV records from KB result:",
+            formattedResults.length,
+            "current sample:",
+            JSON.stringify(formattedResults[formattedResults.length - 1], null, 2)
+          );
+          // Done with this result; continue to next retrieval result
+          continue;
+        }
+      }
+
+      // --- JSON / raw text handling (existing logic) ---
       try {
         // The text might contain JSON objects (could be on single line or multiple lines)
         // Try to find complete JSON objects by matching braces
@@ -137,7 +235,7 @@ async function queryKnowledgeBase(kbId: string, query: string) {
               formattedResults.push(parsed);
             }
           } catch (e) {
-            // Skip invalid JSON
+            console.warn("⚠️ Failed to parse JSON fragment from KB result:", e);
           }
         }
         
@@ -151,16 +249,23 @@ async function queryKnowledgeBase(kbId: string, query: string) {
               formattedResults.push(parsed);
             }
           } catch (e) {
-            // If not JSON, include as text for the agent to process
+            // If not JSON, include as text for the agent / model to process
+            console.log("ℹ️ KB result could not be parsed as JSON, storing as rawText");
             formattedResults.push({ rawText: text });
           }
         }
       } catch (e) {
         // If parsing fails, include raw text
+        console.error("❌ Error while parsing KB result text:", e);
         formattedResults.push({ rawText: text });
       }
     }
     
+    console.log("✅ Vendor KB formattedResults count:", formattedResults.length);
+    if (formattedResults.length > 0) {
+      console.log("✅ Sample formattedResult[0]:", JSON.stringify(formattedResults[0], null, 2));
+    }
+
     // If we have structured data, return it as JSON string
     if (formattedResults.length > 0 && (formattedResults[0].Name || formattedResults[0].TotalPrice !== undefined)) {
       return JSON.stringify(formattedResults, null, 2);
@@ -188,6 +293,7 @@ async function handleToolCall(toolName: string, toolInput: any) {
         try {
           parsed = JSON.parse(results);
         } catch (e) {
+          console.warn("⚠️ Vendor history results not valid JSON, attempting to extract JSON fragments. Raw length:", results?.length);
           // If not JSON, try to extract JSON objects from the text
           const jsonMatches = results.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
           if (jsonMatches && jsonMatches.length > 0) {
@@ -195,11 +301,13 @@ async function handleToolCall(toolName: string, toolInput: any) {
               try {
                 return JSON.parse(m);
               } catch {
+                console.warn("⚠️ Failed to parse JSON fragment in vendor history results");
                 return null;
               }
             }).filter(Boolean);
           } else {
             // Return raw results if we can't parse
+            console.warn("⚠️ No JSON fragments found in vendor history results. Returning raw text to model.");
             return results || "No vendor history data found for this query.";
           }
         }
@@ -211,12 +319,16 @@ async function handleToolCall(toolName: string, toolInput: any) {
         
         // Filter out items without Name or TotalPrice (likely not trip records)
         parsed = parsed.filter((item: any) => item && (item.Name || item.TotalPrice !== undefined));
+        console.log("✅ Parsed vendor history records count:", parsed.length);
+        if (parsed.length > 0) {
+          console.log("✅ Sample parsed vendor record:", JSON.stringify(parsed[0], null, 2));
+        }
         
         if (parsed.length === 0) {
           return results || "No vendor history data found for this query.";
         }
         
-        // Calculate totals
+        // Calculate totals (ignore ShippingHandling as requested)
         const totalPrice = parsed.reduce((sum: number, item: any) => {
           return sum + (parseFloat(item.TotalPrice) || 0);
         }, 0);
@@ -231,26 +343,31 @@ async function handleToolCall(toolName: string, toolInput: any) {
           vendorGroups[vendorId].push(item);
         });
         
-        let summary = `Found ${parsed.length} trip(s):\n\n`;
+        // Build markdown table for trips
+        // Columns: Name, Created Date, Quote #, Subtotal, Total Price, Vendor ID
+        let table = "| Name | Created Date | Quote # | Subtotal | Total Price | Vendor ID |\n";
+        table += "| --- | --- | --- | --- | --- | --- |\n";
         
-        // List trips
-        parsed.forEach((item: any, index: number) => {
-          summary += `${index + 1}. ${item.Name || "Unnamed Trip"}\n`;
-          summary += `   Total Price: $${(item.TotalPrice || 0).toFixed(2)}\n`;
-          if (item.Vendor_Name__c) {
-            summary += `   Vendor ID: ${item.Vendor_Name__c}\n`;
-          }
-          if (item.CreatedDate) {
-            const date = new Date(item.CreatedDate);
-            summary += `   Created Date: ${date.toLocaleDateString()}\n`;
-          }
-          if (item.QuoteNumber) {
-            summary += `   Quote Number: ${item.QuoteNumber}\n`;
-          }
-          summary += `\n`;
+        parsed.forEach((item: any) => {
+          const name = (item.Name || "Unnamed Trip").toString().replace(/\|/g, "\\|");
+          const createdDate = item.CreatedDate
+            ? new Date(item.CreatedDate).toLocaleDateString()
+            : "N/A";
+          const quote = item.QuoteNumber ? item.QuoteNumber.toString().replace(/\|/g, "\\|") : "N/A";
+          const subtotal = item.Subtotal !== undefined && item.Subtotal !== null
+            ? `$${Number(item.Subtotal).toFixed(2)}`
+            : "$0.00";
+          const total = item.TotalPrice !== undefined && item.TotalPrice !== null
+            ? `$${Number(item.TotalPrice).toFixed(2)}`
+            : "$0.00";
+          const vendorId = item.Vendor_Name__c ? item.Vendor_Name__c.toString().replace(/\|/g, "\\|") : "No Vendor Assigned";
+          
+          table += `| ${name} | ${createdDate} | ${quote} | ${subtotal} | ${total} | ${vendorId} |\n`;
         });
         
-        summary += `\nTotal Cost: $${totalPrice.toFixed(2)}\n`;
+        let summary = `Found ${parsed.length} trip(s):\n\n${table}\n`;
+        
+        summary += `\nTotal Cost (all trips): $${totalPrice.toFixed(2)}\n`;
         
         // Show vendor breakdown if there are multiple vendors or user asked about vendors
         const uniqueVendors = Object.keys(vendorGroups).filter(v => v !== "No Vendor Assigned");

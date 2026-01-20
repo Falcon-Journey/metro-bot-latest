@@ -442,7 +442,7 @@ function QuickSuggestions({
 }) {
   const suggestions = [
     "What's the price for trip from CI to Sacramento?",
-    "Show me all trips for vendor 001F0000018vHyNIAU",
+    "Show me all trips for vendor 001F0000018vUxlIAE",
     "List all vendors and their total costs",
     "Find trips to French Village, MO"
   ]
