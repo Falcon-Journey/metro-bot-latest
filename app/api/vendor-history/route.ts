@@ -17,6 +17,16 @@ const bedrock = new BedrockRuntimeClient({
   },
 });
 
+// Helper to create a Salesforce vendor link
+function formatVendorLink(vendorId: string | null | undefined): string {
+  if (!vendorId || vendorId === "null" || vendorId === "No Vendor Assigned") {
+    return "No Vendor Assigned";
+  }
+  const cleanId = vendorId.toString().replace(/\|/g, "\\|");
+  const url = `https://mshuttle.lightning.force.com/lightning/r/Account/${cleanId}/view`;
+  return `[${cleanId}](${url})`;
+}
+
 // Simple CSV line parser that handles quoted fields with commas
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -88,7 +98,13 @@ TOOLS AVAILABLE:
 - search_vendor_history: Search the knowledge base for trip and vendor information
 
 CRITICAL FORMAT RULE:
-- Whenever you need structured information about trips, vendors, or prices, you SHOULD call the tool \"search_vendor_history\" and then format the final answer as markdown tables as described above. Do NOT invent tables that don't align with the retrieved data.`;
+- Whenever you need structured information about trips, vendors, or prices, you SHOULD call the tool \"search_vendor_history\" and then format the final answer as markdown tables as described above. Do NOT invent tables that don't align with the retrieved data.
+
+VENDOR ID LINKING:
+- Whenever a Vendor ID (Vendor_Name__c) is mentioned in your response, you MUST format it as a markdown hyperlink to Salesforce.
+- Link format: [VENDOR_ID](https://mshuttle.lightning.force.com/lightning/r/Account/VENDOR_ID/view)
+- Example: If vendor ID is \"001F0000018vHyNIAU\", display it as [001F0000018vHyNIAU](https://mshuttle.lightning.force.com/lightning/r/Account/001F0000018vHyNIAU/view)
+- This applies to tables, vendor breakdowns, and any text where you mention a vendor ID.`;
 }
 
 const TOOLS: Tool[] = [
@@ -360,9 +376,9 @@ async function handleToolCall(toolName: string, toolInput: any) {
           const total = item.TotalPrice !== undefined && item.TotalPrice !== null
             ? `$${Number(item.TotalPrice).toFixed(2)}`
             : "$0.00";
-          const vendorId = item.Vendor_Name__c ? item.Vendor_Name__c.toString().replace(/\|/g, "\\|") : "No Vendor Assigned";
+          const vendorLink = formatVendorLink(item.Vendor_Name__c);
           
-          table += `| ${name} | ${createdDate} | ${quote} | ${subtotal} | ${total} | ${vendorId} |\n`;
+          table += `| ${name} | ${createdDate} | ${quote} | ${subtotal} | ${total} | ${vendorLink} |\n`;
         });
         
         let summary = `Found ${parsed.length} trip(s):\n\n${table}\n`;
@@ -375,7 +391,8 @@ async function handleToolCall(toolName: string, toolInput: any) {
           summary += `\nVendor Breakdown:\n`;
           Object.entries(vendorGroups).forEach(([vendorId, trips]) => {
             const vendorTotal = trips.reduce((sum: number, t: any) => sum + (parseFloat(t.TotalPrice) || 0), 0);
-            summary += `- ${vendorId}: ${trips.length} trip(s), Total: $${vendorTotal.toFixed(2)}\n`;
+            const vendorLink = formatVendorLink(vendorId);
+            summary += `- ${vendorLink}: ${trips.length} trip(s), Total: $${vendorTotal.toFixed(2)}\n`;
           });
         }
         

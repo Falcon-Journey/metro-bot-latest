@@ -174,6 +174,33 @@ function MarkdownRenderer({ content }: { content: string }) {
     let i = 0
 
     while (i < text.length) {
+      // Markdown links [text](url)
+      if (text[i] === "[") {
+        const closeBracket = text.indexOf("]", i)
+        if (closeBracket !== -1 && text[closeBracket + 1] === "(") {
+          const closeParen = text.indexOf(")", closeBracket + 2)
+          if (closeParen !== -1) {
+            if (current) parts.push(current)
+            current = ""
+            const linkText = text.slice(i + 1, closeBracket)
+            const linkUrl = text.slice(closeBracket + 2, closeParen)
+            parts.push(
+              <a
+                key={i}
+                href={linkUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline hover:text-primary/80"
+              >
+                {linkText}
+              </a>
+            )
+            i = closeParen + 1
+            continue
+          }
+        }
+      }
+
       // Bold **text**
       if (text.slice(i, i + 2) === "**") {
         if (current) parts.push(current)
