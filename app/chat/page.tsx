@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "@/lib/utils"
+import { cn, getGracefulErrorMessage } from "@/lib/utils"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
 import { Button } from "@/components/ui/button"
@@ -1180,7 +1180,14 @@ export default function ChatPage() {
             fetchPricingEstimate(updatedMessages)
           }
         } else {
-          throw streamError
+          setMessages((m) => [
+            ...m,
+            {
+              id: `${Date.now()}-e`,
+              role: "assistant",
+              content: getGracefulErrorMessage(streamError),
+            },
+          ])
         }
       }
         // const normalizedText = normalizeText(fullText)
@@ -1192,30 +1199,12 @@ export default function ChatPage() {
         // }
     } catch (e) {
       console.error("❌ Chat error:", e)
-      
-      // Determine error type and show appropriate message
-      let errorMessage = "I'm having trouble connecting right now. Please try again in a moment."
-      
-      if (e instanceof TypeError && e.message.includes("fetch")) {
-        errorMessage = "I'm having trouble connecting to the server. Please check your internet connection and try again."
-      } else if (e instanceof Error) {
-        if (e.message.includes("404") || e.message.includes("Not Found")) {
-          errorMessage = "The service is temporarily unavailable. Please try again in a moment."
-        } else if (e.message.includes("500") || e.message.includes("Internal Server Error")) {
-          errorMessage = "Something went wrong on our end. Please try again, and if the problem persists, contact support."
-        } else if (e.message.includes("timeout") || e.message.includes("Timeout")) {
-          errorMessage = "The request took too long. Please try again."
-        } else if (e.message.includes("Failed to fetch")) {
-          errorMessage = "Unable to connect. Please check your connection and try again."
-        }
-      }
-      
       setMessages((m) => [
         ...m,
         {
           id: `${Date.now()}-e`,
           role: "assistant",
-          content: errorMessage,
+          content: getGracefulErrorMessage(e),
         },
       ])
     } finally {

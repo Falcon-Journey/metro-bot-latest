@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "@/lib/utils"
+import { cn, getGracefulErrorMessage } from "@/lib/utils"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
 import { Input } from "@/components/ui/input"
@@ -543,48 +543,66 @@ export default function RetrievePage() {
       const decoder = new TextDecoder()
       let fullText = ""
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        fullText += chunk
-        setMessages((prev) => {
-          const hasMsg = prev.some((m) => m.id === msgId)
-          if (!hasMsg) {
-            return [...prev, { id: msgId, role: "assistant", content: chunk }]
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          fullText += chunk
+          setMessages((prev) => {
+            const hasMsg = prev.some((m) => m.id === msgId)
+            if (!hasMsg) {
+              return [...prev, { id: msgId, role: "assistant", content: chunk }]
+            }
+            return prev.map((m) =>
+              m.id === msgId ? { ...m, content: fullText } : m,
+            )
+          })
+        }
+
+        fullText = sanitizeAssistantOutput(fullText)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
+        )
+
+        const normalizedText = normalizeText(fullText)
+        const containsTrigger = triggerPhrases.some((phrase) =>
+          normalizedText.includes(normalizeText(phrase)),
+        )
+
+        if (containsTrigger) {
+          const followUpRes = await fetch("/api/bedrock-agent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              input: "What is the estimated price for this trip?",
+              sessionId,
+              mode,
+            }),
+          })
+
+          if (followUpRes.ok) {
+            const followUpData = sanitizeAssistantOutput(await followUpRes.text())
+            setMessages((prev) => [
+              ...prev,
+              { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
+            ])
           }
-          return prev.map((m) =>
-            m.id === msgId ? { ...m, content: fullText } : m,
+        }
+      } catch (streamError) {
+        if (fullText.trim()) {
+          fullText = sanitizeAssistantOutput(fullText)
+          setMessages((prev) =>
+            prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
           )
-        })
-      }
-
-      fullText = sanitizeAssistantOutput(fullText)
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
-      )
-
-      const normalizedText = normalizeText(fullText)
-      const containsTrigger = triggerPhrases.some((phrase) =>
-        normalizedText.includes(normalizeText(phrase)),
-      )
-
-      if (containsTrigger) {
-        const followUpRes = await fetch("/api/bedrock-agent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            input: "What is the estimated price for this trip?",
-            sessionId,
-            mode,
-          }),
-        })
-
-        if (followUpRes.ok) {
-          const followUpData = sanitizeAssistantOutput(await followUpRes.text())
-          setMessages((prev) => [
-            ...prev,
-            { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
+        } else {
+          setMessages((m) => [
+            ...m,
+            {
+              id: `${Date.now()}-e`,
+              role: "assistant",
+              content: getGracefulErrorMessage(streamError),
+            },
           ])
         }
       }
@@ -595,8 +613,7 @@ export default function RetrievePage() {
         {
           id: `${Date.now()}-e`,
           role: "assistant",
-          content:
-            "Sorry, I couldn't reach the agent. Verify env vars and AWS configuration.",
+          content: getGracefulErrorMessage(e),
         },
       ])
     } finally {
