@@ -228,8 +228,27 @@ function MarkdownRenderer({ content }: { content: string }) {
     }
 
     const headerRow = parseRow(rows[0])
-    const isSeparator = (row: string) => row.match(/^\|[\s\-:]+\|$/)
-    const dataRows = rows.slice(1).filter((r) => !isSeparator(r))
+    // Markdown separator rows have multiple cells of hyphens/spaces/colons (e.g. | ----- | ----- |)
+    const isSeparator = (row: string) => {
+      const cells = parseRow(row)
+      return cells.length > 0 && cells.every((cell) => /^[\s\-:]+$/.test(cell))
+    }
+    const routeColIndex = headerRow.findIndex(
+      (h) => String(h).toLowerCase().replace(/\s+/g, "") === "route"
+    )
+    // Treat route as empty if cell is blank, "-", or destination is missing (e.g. "-> -" or "X -> -")
+    const hasEmptyRoute = (row: string) => {
+      if (routeColIndex === -1) return false
+      const cells = parseRow(row)
+      const route = (cells[routeColIndex] ?? "").trim()
+      if (!route || route === "-") return true
+      if (/->\s*-\s*$/.test(route)) return true // "-> -" or "Newark Airport -> -"
+      return false
+    }
+    const dataRows = rows
+      .slice(1)
+      .filter((r) => !isSeparator(r))
+      .filter((r) => !hasEmptyRoute(r))
 
     return (
       <div key={key} className="mb-4 overflow-x-auto">
