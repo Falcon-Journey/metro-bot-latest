@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const { name, dimensions = 1024 } = body // Default to Titan V2 dimensions
 
     const region = process.env.AWS_REGION || "us-west-2"
-    const accountId = process.env.AWS_ACCOUNT_ID!
+    const accountId = process.env.NEXT_AWS_ACCOUNT_ID!
     const agentId = process.env.BEDROCK_RETRIEVE_AGENT_ID!
     const roleArn = process.env.BEDROCK_KB_ROLE_ARN!
     const embeddingModelArn =

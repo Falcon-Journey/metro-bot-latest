@@ -9,12 +9,9 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 import { NextRequest } from "next/server";
 
+// Let AWS SDK resolve credentials from the environment/role (no custom AWS_* vars needed)
 const bedrock = new BedrockRuntimeClient({
   region: process.env.AWS_REGION || "us-west-2",
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  },
 });
 
 // Helper to create a Salesforce vendor link
