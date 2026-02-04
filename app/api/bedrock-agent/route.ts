@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   try {
     const { input, sessionId, mode, agentId: clientAgentId, alias: clientAlias } = await req.json()
 
-    const region = process.env.AWS_REGION || "us-west-2"
+    const region = process.env.AWS_REGION || "us-east-1"
 
     // --- 🔁 Resolve agent config based on mode or client overrides --- //
     const agentConfig =

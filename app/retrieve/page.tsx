@@ -1,6 +1,6 @@
 "use client"
 
-import { cn, getGracefulErrorMessage } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type React from "react"
 import { Input } from "@/components/ui/input"
@@ -182,6 +182,37 @@ function MarkdownRenderer({ content }: { content: string }) {
     let i = 0
 
     while (i < text.length) {
+      // Markdown links: [label](url)
+      if (text[i] === "[") {
+        const closeBracket = text.indexOf("]", i + 1)
+        const openParen = closeBracket !== -1 ? text.indexOf("(", closeBracket + 1) : -1
+        const closeParen = openParen !== -1 ? text.indexOf(")", openParen + 1) : -1
+
+        if (closeBracket !== -1 && openParen === closeBracket + 1 && closeParen !== -1) {
+          const label = text.slice(i + 1, closeBracket)
+          const url = text.slice(openParen + 1, closeParen).trim()
+          const isSafeUrl = /^https?:\/\//i.test(url)
+
+          if (isSafeUrl) {
+            if (current) parts.push(current)
+            current = ""
+            parts.push(
+              <a
+                key={i}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary underline underline-offset-2 hover:opacity-90"
+              >
+                {label}
+              </a>,
+            )
+            i = closeParen + 1
+            continue
+          }
+        }
+      }
+
       // Bold **text**
       if (text.slice(i, i + 2) === "**") {
         if (current) parts.push(current)
@@ -497,7 +528,9 @@ export default function RetrievePage() {
     const timeString = now.toLocaleString(locale, { dateStyle: "full", timeStyle: "short" })
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone?.replace(/_/g, " ")
     const locationDescription = timeZone ? `${timeZone}` : "an unknown location"
-    return `Context (hidden from the user): The local time is ${timeString}, and the approximate location based on timezone is ${locationDescription}.`
+    return `Context (hidden from the user): The local time is ${timeString}, and the approximate location based on timezone is ${locationDescription}.
+
+Formatting (hidden from the user): If you present a markdown table of similar/historical trips, include an additional column named "Opportunity". In that column, show the Salesforce Opportunity ID as a markdown hyperlink in this exact format: [OPPORTUNITY_ID](https://mshuttle.lightning.force.com/lightning/r/Opportunity/OPPORTUNITY_ID/view).`
   }, [])
 
   const triggerPhrases = [
@@ -543,66 +576,48 @@ export default function RetrievePage() {
       const decoder = new TextDecoder()
       let fullText = ""
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          const chunk = decoder.decode(value, { stream: true })
-          fullText += chunk
-          setMessages((prev) => {
-            const hasMsg = prev.some((m) => m.id === msgId)
-            if (!hasMsg) {
-              return [...prev, { id: msgId, role: "assistant", content: chunk }]
-            }
-            return prev.map((m) =>
-              m.id === msgId ? { ...m, content: fullText } : m,
-            )
-          })
-        }
-
-        fullText = sanitizeAssistantOutput(fullText)
-        setMessages((prev) =>
-          prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
-        )
-
-        const normalizedText = normalizeText(fullText)
-        const containsTrigger = triggerPhrases.some((phrase) =>
-          normalizedText.includes(normalizeText(phrase)),
-        )
-
-        if (containsTrigger) {
-          const followUpRes = await fetch("/api/bedrock-agent", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              input: "What is the estimated price for this trip?",
-              sessionId,
-              mode,
-            }),
-          })
-
-          if (followUpRes.ok) {
-            const followUpData = sanitizeAssistantOutput(await followUpRes.text())
-            setMessages((prev) => [
-              ...prev,
-              { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
-            ])
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        fullText += chunk
+        setMessages((prev) => {
+          const hasMsg = prev.some((m) => m.id === msgId)
+          if (!hasMsg) {
+            return [...prev, { id: msgId, role: "assistant", content: chunk }]
           }
-        }
-      } catch (streamError) {
-        if (fullText.trim()) {
-          fullText = sanitizeAssistantOutput(fullText)
-          setMessages((prev) =>
-            prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
+          return prev.map((m) =>
+            m.id === msgId ? { ...m, content: fullText } : m,
           )
-        } else {
-          setMessages((m) => [
-            ...m,
-            {
-              id: `${Date.now()}-e`,
-              role: "assistant",
-              content: getGracefulErrorMessage(streamError),
-            },
+        })
+      }
+
+      fullText = sanitizeAssistantOutput(fullText)
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, content: fullText } : m)),
+      )
+
+      const normalizedText = normalizeText(fullText)
+      const containsTrigger = triggerPhrases.some((phrase) =>
+        normalizedText.includes(normalizeText(phrase)),
+      )
+
+      if (containsTrigger) {
+        const followUpRes = await fetch("/api/bedrock-agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input: "What is the estimated price for this trip?",
+            sessionId,
+            mode,
+          }),
+        })
+
+        if (followUpRes.ok) {
+          const followUpData = sanitizeAssistantOutput(await followUpRes.text())
+          setMessages((prev) => [
+            ...prev,
+            { id: `${Date.now()}-f`, role: "assistant", content: followUpData },
           ])
         }
       }
@@ -613,7 +628,8 @@ export default function RetrievePage() {
         {
           id: `${Date.now()}-e`,
           role: "assistant",
-          content: getGracefulErrorMessage(e),
+          content:
+            "Sorry, I couldn't reach the agent. Verify env vars and AWS configuration.",
         },
       ])
     } finally {
