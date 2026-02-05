@@ -11,7 +11,10 @@ export class NovaSonicBidirectionalStreamClient {
   private streamClosed = false;
 
   constructor(region: string) {
-    this.bedrockRuntimeClient = new BedrockRuntimeClient({ region });
+    this.bedrockRuntimeClient = new BedrockRuntimeClient({ region, credentials: {
+      accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || "",
+      secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || "",
+    }, });
   }
 
   async initiateSession() {
