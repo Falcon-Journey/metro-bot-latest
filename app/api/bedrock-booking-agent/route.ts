@@ -472,7 +472,7 @@ export async function POST(req: NextRequest) {
             const systemPrompt = buildSystemPrompt(conversationMessages);
             
             const command = new ConverseStreamCommand({
-              modelId: "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+              modelId: "amazon.nova-sonic-v1:0",
               messages: conversationMessages,
               system: [{ text: systemPrompt }],
               toolConfig: { tools: TOOLS },
