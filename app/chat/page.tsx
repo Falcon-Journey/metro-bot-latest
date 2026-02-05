@@ -32,7 +32,10 @@ function normalizeText(text: string) {
 }
 
 function sanitizeAssistantOutput(text: string) {
-  return text.replace(/<\/sources>/gi, "")
+  return text
+    .replace(/<\/sources>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "") // Nova Pro: hide thinking blocks
+    .trim()
 }
 
 // Extract phone number from text - handles 8-10 digit numbers
@@ -306,56 +309,19 @@ function extractPriceFromAnswer(text: string): string {
   return resultLines.join('\n').trim();
 }
 
-// Extract booking agent pricing answer - shows full answer but cuts off at "Based on X similar historical trips:" or tables
+// Extract booking agent pricing answer - return ONLY the two pricing lines (price range + per-passenger cost)
 function extractBookingPricingAnswer(text: string): string {
-  // Look for the cutoff pattern: "Based on X similar historical trips:" where X is any number
-  const cutoffPattern = /Based on \d+ similar historical trips?:/i;
-  const cutoffMatch = text.match(cutoffPattern);
-  
-  let cutoffIndex = -1;
-  
-  if (cutoffMatch) {
-    cutoffIndex = text.indexOf(cutoffMatch[0]);
-  }
-  
-  // Also check for table markers
-  const tableIndex = text.indexOf('|');
-  
-  // Determine the earliest cutoff point
-  let finalCutoffIndex = text.length;
-  
-  if (cutoffIndex !== -1) {
-    finalCutoffIndex = Math.min(finalCutoffIndex, cutoffIndex);
-  }
-  
-  if (tableIndex !== -1) {
-    finalCutoffIndex = Math.min(finalCutoffIndex, tableIndex);
-  }
-  
-  // Extract text up to the cutoff point
-  let extracted = text.substring(0, finalCutoffIndex).trim();
-  
-  // Also check line by line to stop at the line containing the cutoff pattern
-  const lines = extracted.split('\n');
+  const lines = text.split('\n');
+  const priceRangeLine = lines.find((l) =>
+    /💰\s*Estimated Price Range:/i.test(l) || /Estimated Price Range:/i.test(l.trim())
+  );
+  const perPassengerLine = lines.find((l) =>
+    /👥\s*Based on the number of passengers/i.test(l) || /Based on the number of passengers you selected/i.test(l.trim())
+  );
   const resultLines: string[] = [];
-  
-  for (const line of lines) {
-    // Stop if this line contains the cutoff pattern
-    if (cutoffPattern.test(line)) {
-      break;
-    }
-    // Stop if we encounter a table marker
-    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-      break;
-    }
-    // Stop if we encounter markdown table separator
-    if (line.trim().match(/^[\|\s\-:]+$/)) {
-      break;
-    }
-    resultLines.push(line);
-  }
-  
-  return resultLines.join('\n').trim();
+  if (priceRangeLine) resultLines.push(priceRangeLine.trim());
+  if (perPassengerLine) resultLines.push(perPassengerLine.trim());
+  return resultLines.join('\n');
 }
 
 // ---------------- Markdown Renderer ---------------- //
