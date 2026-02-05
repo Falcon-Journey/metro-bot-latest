@@ -94,7 +94,9 @@ function MarkdownRenderer({ content }: { content: string }) {
         tableRows.push(line)
         return
       } else if (inTable) {
+        // Table ended - flush it and continue processing this line as regular content
         flushTable()
+        // Don't return - let this line be processed as regular text/paragraph
       }
 
       // Headers

@@ -295,7 +295,7 @@ async function queryKnowledgeBase(kbId: string, query: string) {
 async function handleToolCall(toolName: string, toolInput: any) {
   switch (toolName) {
     case "search_vendor_history":
-      const vendorHistoryKbId = process.env.VENDOR_HISTORY_KB_ID || "BVKIT12CIF";
+      const vendorHistoryKbId = process.env.VENDOR_HISTORY_KB_ID || "SDHWVT8JMB";
       const results = await queryKnowledgeBase(vendorHistoryKbId, toolInput.query);
       
       // Parse results and provide summary
@@ -378,14 +378,15 @@ async function handleToolCall(toolName: string, toolInput: any) {
           table += `| ${name} | ${createdDate} | ${quote} | ${subtotal} | ${total} | ${vendorLink} |\n`;
         });
         
-        let summary = `Found ${parsed.length} trip(s):\n\n${table}\n`;
+        // Ensure table ends with proper newline and add summary with clear separation
+        let summary = `Found ${parsed.length} trip(s):\n\n${table}\n\n`;
         
-        summary += `\nTotal Cost (all trips): $${totalPrice.toFixed(2)}\n`;
+        summary += `**Total Cost (all trips):** $${totalPrice.toFixed(2)}\n\n`;
         
         // Show vendor breakdown if there are multiple vendors or user asked about vendors
         const uniqueVendors = Object.keys(vendorGroups).filter(v => v !== "No Vendor Assigned");
         if (uniqueVendors.length > 0) {
-          summary += `\nVendor Breakdown:\n`;
+          summary += `**Vendor Breakdown:**\n\n`;
           Object.entries(vendorGroups).forEach(([vendorId, trips]) => {
             const vendorTotal = trips.reduce((sum: number, t: any) => sum + (parseFloat(t.TotalPrice) || 0), 0);
             const vendorLink = formatVendorLink(vendorId);
@@ -393,7 +394,7 @@ async function handleToolCall(toolName: string, toolInput: any) {
           });
         }
         
-        return summary;
+        return summary.trim() + "\n";
       } catch (e) {
         console.error("Error processing vendor history results:", e);
         // If parsing fails, return raw results

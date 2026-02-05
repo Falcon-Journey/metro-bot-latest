@@ -102,7 +102,9 @@ function MarkdownRenderer({ content }: { content: string }) {
         tableRows.push(line)
         return
       } else if (inTable) {
+        // Table ended - flush it and continue processing this line as regular content
         flushTable()
+        // Don't return - let this line be processed as regular text/paragraph
       }
 
       // Headers
@@ -294,15 +296,26 @@ function MarkdownRenderer({ content }: { content: string }) {
             </tr>
           </thead>
           <tbody>
-            {dataRows.map((row, i) => (
-              <tr key={i} className="border-b border-border last:border-0 hover:bg-accent/30">
-                {parseRow(row).map((cell, j) => (
-                  <td key={j} className="px-4 py-2">
-                    {parseInlineFormatting(cell)}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {dataRows.map((row, i) => {
+              const cells = parseRow(row)
+              // Ensure data row has same number of columns as header (pad with empty cells if needed)
+              const paddedCells = [...cells]
+              while (paddedCells.length < headerRow.length) {
+                paddedCells.push("")
+              }
+              // Truncate if somehow more cells than headers
+              const finalCells = paddedCells.slice(0, headerRow.length)
+              
+              return (
+                <tr key={i} className="border-b border-border last:border-0 hover:bg-accent/30">
+                  {finalCells.map((cell, j) => (
+                    <td key={j} className="px-4 py-2">
+                      {parseInlineFormatting(cell)}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -530,7 +543,7 @@ export default function RetrievePage() {
     const locationDescription = timeZone ? `${timeZone}` : "an unknown location"
     return `Context (hidden from the user): The local time is ${timeString}, and the approximate location based on timezone is ${locationDescription}.
 
-Formatting (hidden from the user): If you present a markdown table of similar/historical trips, include an additional column named "Opportunity". In that column, show the Salesforce Opportunity ID as a markdown hyperlink in this exact format: [OPPORTUNITY_ID](https://mshuttle.lightning.force.com/lightning/r/Opportunity/OPPORTUNITY_ID/view).`
+Table Formatting (hidden from the user): When presenting historical trips in a markdown table, use this EXACT column order: Trip Date | Route | Passengers | Trip Type | Fare | Distance Match | Opportunity. The Opportunity column must be last and format each Opportunity ID as: [OPPORTUNITY_ID](https://mshuttle.lightning.force.com/lightning/r/Opportunity/OPPORTUNITY_ID/view). If Opportunity ID is missing, display "-". Ensure Route column is never empty - use city fields as fallback if address is missing.`
   }, [])
 
   const triggerPhrases = [
