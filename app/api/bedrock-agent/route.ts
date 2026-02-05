@@ -53,8 +53,8 @@ export async function POST(req: Request) {
     // --- 🧠 Initialize client --- //
     const client = new BedrockAgentRuntimeClient({   region,
       credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+        accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY!,
       }, })
     console.log(`[${requestId}] ✅ Bedrock Client Initialized`)
 
