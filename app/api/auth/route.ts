@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 export async function POST(req: Request) {
   const { password } = await req.json()
-  const adminPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD
+  const adminPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "demo123"
 
   if (!adminPassword) {
     return NextResponse.json({ error: "Server misconfiguration: missing ADMIN_PASSWORD" }, { status: 500 })

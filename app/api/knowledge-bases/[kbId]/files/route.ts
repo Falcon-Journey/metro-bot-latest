@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid"
 
 export const dynamic = "force-dynamic"
 
-const region = process.env.AWS_REGION || "us-west-2"
+const region = process.env.AWS_REGION || "us-east-1"
 const s3 = new S3Client({ region })
 
 // 🧠 Helper: get S3 info for KB from environment

@@ -27,12 +27,12 @@ export async function POST(req: Request) {
     const agentConfig =
       mode === "retrieve"
         ? {
-            agentId: clientAgentId || process.env.BEDROCK_RETRIEVE_AGENT_ID!,
-            aliasId: clientAlias || process.env.BEDROCK_RETRIEVE_AGENT_ALIAS_ID!,
+            agentId: clientAgentId || process.env.BEDROCK_RETRIEVE_AGENT_ID || "QSSCWG19UJ",
+            aliasId: clientAlias || process.env.BEDROCK_RETRIEVE_AGENT_ALIAS_ID || "7TQBZAHN1X",
           }
         : {
-            agentId: clientAgentId || process.env.BEDROCK_BOOKING_AGENT_ID!,
-            aliasId: clientAlias || process.env.BEDROCK_BOOKING_AGENT_ALIAS_ID!,
+            agentId: clientAgentId || process.env.BEDROCK_BOOKING_AGENT_ID || "QSSCWG19UJ",
+            aliasId: clientAlias || process.env.BEDROCK_BOOKING_AGENT_ALIAS_ID || "7TQBZAHN1X",
           }
 
     console.log(`[${requestId}] 🤖 Agent Config:`, {

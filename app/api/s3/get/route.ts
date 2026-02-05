@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3"
 
-const s3 = new S3Client({ region: process.env.AWS_REGION })
+const s3 = new S3Client({ region: process.env.AWS_REGION || "us-east-1" })
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)

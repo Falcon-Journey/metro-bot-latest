@@ -2,10 +2,10 @@ import { type NextRequest, NextResponse } from "next/server"
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION!,
+  region: process.env.AWS_REGION || "us-east-1",
   credentials: {
-    accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY!,
+    accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || "",
   },
 })
 
@@ -22,11 +22,11 @@ export async function POST(request: NextRequest) {
     // Determine bucket based on type
     let bucketName: string | undefined
     if (type === "voice") {
-      bucketName = process.env.AWS_VOICE_BUCKET
+      bucketName = process.env.AWS_VOICE_BUCKET || ""
     } else if (type === "chat") {
-      bucketName = process.env.AWS_CHAT_BUCKET
+      bucketName = process.env.AWS_CHAT_BUCKET || ""
     } else if (type === "cms") {
-      bucketName = process.env.AWS_CMS_BUCKET
+      bucketName = process.env.AWS_CMS_BUCKET || ""
     }
 
     if (!bucketName) {

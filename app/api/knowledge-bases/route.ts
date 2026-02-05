@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic"
 
 export async function GET() {
   try {
-    const region = process.env.AWS_REGION || "us-west-2"
-    const agentIdsEnv = process.env.BEDROCK_AGENT_IDS
-    const agentVersionsEnv = process.env.BEDROCK_AGENT_VERSIONS
+    const region = process.env.AWS_REGION || "us-east-1"
+    const agentIdsEnv = process.env.BEDROCK_AGENT_IDS || "QSSCWG19UJ"
+    const agentVersionsEnv = process.env.BEDROCK_AGENT_VERSIONS || "5"
 
     if (!agentIdsEnv) throw new Error("Missing BEDROCK_AGENT_IDS in environment variables")
     if (!agentVersionsEnv) throw new Error("Missing BEDROCK_AGENT_VERSIONS in environment variables")

@@ -379,8 +379,8 @@ async function queryKnowledgeBase(kbId: string, query: string) {
     const agentRuntime = new BedrockAgentRuntimeClient({
       region: process.env.AWS_REGION || "us-east-1",
       credentials: {
-        accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY!,
+        accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || "",
+        secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || "",
       },
     });
 
@@ -416,13 +416,13 @@ async function handleToolCall(toolName: string, toolInput: any) {
       });
 
     case "get_pricing":
-      const pricingKbId = process.env.PRICING_KB_ID || "";
+      const pricingKbId = process.env.PRICING_KB_ID || "AOHOJWFMJM";
       if (!pricingKbId) return "Pricing information temporarily unavailable.";
       const pricing = await queryKnowledgeBase(pricingKbId, toolInput.query);
       return pricing || "No pricing data found for this query.";
 
     case "search_faqs":
-      const faqKbId = process.env.FAQ_KB_ID || "";
+      const faqKbId = process.env.FAQ_KB_ID || "KJYMZYRF17";
       if (!faqKbId) return "FAQ information temporarily unavailable.";
       const faq = await queryKnowledgeBase(faqKbId, toolInput.query);
       return faq || "No FAQ information found.";

@@ -18,10 +18,10 @@ export async function POST(req: Request) {
     const body = await req.json()
     const { name, dimensions = 1024 } = body // Default to Titan V2 dimensions
 
-    const region = process.env.AWS_REGION || "us-west-2"
-    const accountId = process.env.NEXT_AWS_ACCOUNT_ID!
-    const agentId = process.env.BEDROCK_RETRIEVE_AGENT_ID!
-    const roleArn = process.env.BEDROCK_KB_ROLE_ARN!
+    const region = process.env.AWS_REGION || "us-east-1"
+    const accountId = process.env.NEXT_AWS_ACCOUNT_ID || "336636636636"
+    const agentId = process.env.BEDROCK_RETRIEVE_AGENT_ID || "QSSCWG19UJ"
+    const roleArn = process.env.BEDROCK_KB_ROLE_ARN || "arn:aws:iam::336636636636:role/bedrock-agent-role"
     const embeddingModelArn =
       process.env.BEDROCK_EMBED_MODEL_ARN ||
       `arn:aws:bedrock:${region}::foundation-model/amazon.titan-embed-text-v2:0`
@@ -226,7 +226,7 @@ export async function PUT(req: Request) {
       )
     }
 
-    const region = process.env.AWS_REGION || "us-west-2"
+    const region = process.env.AWS_REGION || "us-east-1"
     const bedrock = new BedrockAgentClient({ region })
     
     console.log(`Starting ingestion for KB: ${knowledgeBaseId}`)

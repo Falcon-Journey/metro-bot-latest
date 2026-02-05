@@ -7,7 +7,7 @@ import {
 
 export const dynamic = "force-dynamic"
 
-const region = process.env.AWS_REGION || "us-west-2"
+const region = process.env.AWS_REGION || "us-east-1"
 const client = new BedrockClient({ region })
 
 // 🧠 Get Guardrail Details
