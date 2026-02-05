@@ -480,7 +480,7 @@ export async function POST(req: NextRequest) {
             const systemPrompt = buildSystemPrompt(conversationMessages);
             
             const command = new ConverseStreamCommand({
-              modelId: "amazon.nova-sonic-v1:0",
+              modelId: "amazon.nova-pro-v1:0",
               messages: conversationMessages,
               system: [{ text: systemPrompt }],
               toolConfig: { tools: TOOLS },
