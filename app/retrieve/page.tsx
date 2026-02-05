@@ -95,13 +95,28 @@ function MarkdownRenderer({ content }: { content: string }) {
         return
       }
 
-      // Table detection
-      if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      // Table detection - be more lenient: if line starts with |, treat it as table row
+      // This handles cases where markdown links or long URLs might break the row format
+      if (line.trim().startsWith("|")) {
         flushParagraph()
         inTable = true
+        // If row doesn't end with |, it might be a continuation or broken link - still include it
+        // We'll handle incomplete rows in the renderTable function
         tableRows.push(line)
         return
       } else if (inTable) {
+        // Check if this line is a continuation of the previous table row (e.g., broken markdown link)
+        // If it looks like it might be part of a URL or link continuation, append to last row
+        const lastRow = tableRows[tableRows.length - 1]
+        if (lastRow && (
+          line.trim().startsWith("(") || // URL continuation like "(https://..."
+          line.trim().match(/^https?:\/\//) || // Direct URL
+          (lastRow.includes("[") && !lastRow.includes("](")) // Incomplete markdown link
+        )) {
+          // This looks like a continuation - append to last row
+          tableRows[tableRows.length - 1] = lastRow + " " + line.trim()
+          return
+        }
         // Table ended - flush it and continue processing this line as regular content
         flushTable()
         // Don't return - let this line be processed as regular text/paragraph
@@ -254,34 +269,52 @@ function MarkdownRenderer({ content }: { content: string }) {
 
   const renderTable = (rows: string[], key: number) => {
     const parseRow = (row: string) => {
-      return row
-        .split("|")
-        .slice(1, -1)
-        .map((cell) => cell.trim())
+      // Handle rows that might not end with | (e.g., broken markdown links)
+      let normalizedRow = row.trim()
+      const cells = normalizedRow.split("|")
+      // Remove first empty element (before first |) and last empty element (after last |)
+      // But if row doesn't end with |, last element might have content
+      if (normalizedRow.endsWith("|")) {
+        return cells.slice(1, -1).map((cell) => cell.trim())
+      } else {
+        // Row doesn't end with | - take everything after first |, including the last cell
+        return cells.slice(1).map((cell) => cell.trim())
+      }
     }
 
     const headerRow = parseRow(rows[0])
+    
     // Markdown separator rows have multiple cells of hyphens/spaces/colons (e.g. | ----- | ----- |)
-    const isSeparator = (row: string) => {
-      const cells = parseRow(row)
+    const isSeparator = (cells: string[]) => {
       return cells.length > 0 && cells.every((cell) => /^[\s\-:]+$/.test(cell))
     }
+    
     const routeColIndex = headerRow.findIndex(
       (h) => String(h).toLowerCase().replace(/\s+/g, "") === "route"
     )
+    
     // Treat route as empty if cell is blank, "-", or destination is missing (e.g. "-> -" or "X -> -")
-    const hasEmptyRoute = (row: string) => {
+    const hasEmptyRoute = (cells: string[]) => {
       if (routeColIndex === -1) return false
-      const cells = parseRow(row)
       const route = (cells[routeColIndex] ?? "").trim()
       if (!route || route === "-") return true
       if (/->\s*-\s*$/.test(route)) return true // "-> -" or "Newark Airport -> -"
       return false
     }
-    const dataRows = rows
-      .slice(1)
-      .filter((r) => !isSeparator(r))
-      .filter((r) => !hasEmptyRoute(r))
+    
+    // Parse all rows first, then filter
+    const parsedRows = rows.slice(1).map(parseRow)
+    
+    // Filter out separator rows and rows with empty routes
+    const dataRows = parsedRows.filter((cells) => {
+      // Remove separator rows
+      if (isSeparator(cells)) return false
+      // Remove rows with no meaningful data
+      if (!cells.some(cell => /[a-zA-Z0-9]/.test(cell))) return false
+      // Remove rows with empty routes
+      if (hasEmptyRoute(cells)) return false
+      return true
+    })
 
     return (
       <div key={key} className="mb-4 overflow-x-auto">
@@ -296,8 +329,7 @@ function MarkdownRenderer({ content }: { content: string }) {
             </tr>
           </thead>
           <tbody>
-            {dataRows.map((row, i) => {
-              const cells = parseRow(row)
+            {dataRows.map((cells, i) => {
               // Ensure data row has same number of columns as header (pad with empty cells if needed)
               const paddedCells = [...cells]
               while (paddedCells.length < headerRow.length) {
