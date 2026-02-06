@@ -18,11 +18,6 @@ const bedrock = new BedrockRuntimeClient({
   },
 });
 
-/** Strip Nova Pro <thinking>...</thinking> blocks so they are not sent to the client */
-function stripThinkingBlocks(text: string): string {
-  return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim();
-}
-
 // Helper to create a Salesforce vendor link
 function formatVendorLink(vendorId: string | null | undefined): string {
   if (!vendorId || vendorId === "null" || vendorId === "No Vendor Assigned") {
@@ -81,6 +76,7 @@ KNOWLEDGE BASE DATA STRUCTURE:
 The knowledge base contains JSON records with the following fields:
 - Name: Trip name/description (e.g., "CI - 04/22 - trip to Sacramento, CA")
 - TotalPrice: Total price for the trip
+- Subtotal: Subtotal amount
 - Vendor_Name__c: Vendor ID (may be null)
 - CreatedDate: Date when the record was created
 - QuoteNumber: Quote number
@@ -95,7 +91,7 @@ SEARCH STRATEGIES:
 RESPONSE FORMAT:
 - Be clear and concise
 - When listing trips or pricing results, you MUST present them in a **markdown table** (not as bullet points or plain text)
-- The primary trip table should use columns like: **Trip Name**, **Created Date**, **Quote #**, **Total Price**, **Vendor ID**
+- The primary trip table should use columns like: **Trip Name**, **Created Date**, **Quote #**, **Subtotal**, **Total Price**, **Vendor ID**
 - When calculating totals, show a short text summary *after* the table (e.g., total cost, min/max/average) and, when appropriate, a separate **Vendor Breakdown** section
 - If no results are found, clearly state that and suggest alternative search terms
 
@@ -177,22 +173,16 @@ async function queryKnowledgeBase(kbId: string, query: string) {
       const trimmed = text.trim();
 
       // --- CSV handling: detect and parse CSV with header row ---
-      // Detect CSV header by parsing the first line and checking for expected columns,
-      // regardless of column order (supports headers like:
-      // "Name,CreatedDate,...,Subtotal,...,TotalPrice,Vendor_Name__c"
-      // or "CreatedDate,Name,...,Subtotal,...,TotalPrice,Vendor_Name__c").
-      const firstLine = trimmed.split(/\r?\n/)[0] || "";
-      const headerFields = parseCsvLine(firstLine);
-      const hasTripCsvColumns =
-        headerFields.includes("Name") &&
-        headerFields.includes("CreatedDate") &&
-        // headerFields.includes("Subtotal") &&
-        headerFields.includes("TotalPrice");
+      // Header can be either quoted or unquoted
+      const isCsvHeader =
+        trimmed.startsWith("Name,CreatedDate,OpportunityId") ||
+        trimmed.startsWith('"Name","CreatedDate","OpportunityId"');
 
-      if (hasTripCsvColumns) {
+      if (isCsvHeader) {
         console.log("📑 Detected CSV format in KB result, parsing as CSV");
         const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
         if (lines.length > 1) {
+          const headerFields = parseCsvLine(lines[0]);
 
           for (let li = 1; li < lines.length; li++) {
             const rowLine = lines[li];
@@ -210,10 +200,10 @@ async function queryKnowledgeBase(kbId: string, query: string) {
             });
 
             // Normalize numeric fields
-            // if (record.Subtotal !== undefined && record.Subtotal !== null && record.Subtotal !== "null") {
-            //   const n = Number(record.Subtotal);
-            //   record.Subtotal = isNaN(n) ? record.Subtotal : n;
-            // }
+            if (record.Subtotal !== undefined && record.Subtotal !== null && record.Subtotal !== "null") {
+              const n = Number(record.Subtotal);
+              record.Subtotal = isNaN(n) ? record.Subtotal : n;
+            }
             if (record.TotalPrice !== undefined && record.TotalPrice !== null && record.TotalPrice !== "null") {
               const n = Number(record.TotalPrice);
               record.TotalPrice = isNaN(n) ? record.TotalPrice : n;
@@ -371,9 +361,9 @@ async function handleToolCall(toolName: string, toolInput: any) {
         });
         
         // Build markdown table for trips
-        // Columns: Name, Created Date, Quote #, Total Price, Vendor ID
-        let table = "| Name | Created Date | Quote # | Total Price | Vendor ID |\n";
-        table += "| --- | --- | --- | --- | --- |\n";
+        // Columns: Name, Created Date, Quote #, Subtotal, Total Price, Vendor ID
+        let table = "| Name | Created Date | Quote # | Subtotal | Total Price | Vendor ID |\n";
+        table += "| --- | --- | --- | --- | --- | --- |\n";
         
         parsed.forEach((item: any) => {
           const name = (item.Name || "Unnamed Trip").toString().replace(/\|/g, "\\|");
@@ -381,12 +371,15 @@ async function handleToolCall(toolName: string, toolInput: any) {
             ? new Date(item.CreatedDate).toLocaleDateString()
             : "N/A";
           const quote = item.QuoteNumber ? item.QuoteNumber.toString().replace(/\|/g, "\\|") : "N/A";
+          const subtotal = item.Subtotal !== undefined && item.Subtotal !== null
+            ? `$${Number(item.Subtotal).toFixed(2)}`
+            : "$0.00";
           const total = item.TotalPrice !== undefined && item.TotalPrice !== null
             ? `$${Number(item.TotalPrice).toFixed(2)}`
             : "$0.00";
           const vendorLink = formatVendorLink(item.Vendor_Name__c);
           
-          table += `| ${name} | ${createdDate} | ${quote} | ${total} | ${vendorLink} |\n`;
+          table += `| ${name} | ${createdDate} | ${quote} | ${subtotal} | ${total} | ${vendorLink} |\n`;
         });
         
         // Ensure table ends with proper newline and add summary with clear separation
@@ -448,7 +441,7 @@ export async function POST(req: NextRequest) {
             const systemPrompt = buildSystemPrompt();
             
             const command = new ConverseStreamCommand({
-              modelId: "amazon.nova-pro-v1:0",
+              modelId: "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
               messages: conversationMessages,
               system: [{ text: systemPrompt }],
               toolConfig: { tools: TOOLS },
@@ -472,11 +465,11 @@ export async function POST(req: NextRequest) {
             let fullText = "";
 
             for await (const event of response.stream) {
-              // Stream text deltas (buffer and strip <thinking> blocks before sending - Nova Pro)
+              // Stream text deltas
               if (event.contentBlockDelta?.delta?.text) {
                 const text = event.contentBlockDelta.delta.text;
                 fullText += text;
-                // Don't enqueue yet - we'll send after stripping thinking
+                controller.enqueue(encoder.encode(text));
               }
 
               // Capture tool use start
@@ -517,18 +510,9 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Strip <thinking>...</thinking> before sending to client and before adding to conversation
-            const textToSend = stripThinkingBlocks(fullText);
-            if (textToSend) {
-              controller.enqueue(encoder.encode(textToSend));
-            }
-
-            // Add text content first if exists (use stripped text so history has no thinking)
+            // Add text content first if exists
             if (fullText) {
-              const textForHistory = stripThinkingBlocks(fullText);
-              if (textForHistory) {
-                assistantContent.unshift({ text: textForHistory } as ContentBlock);
-              }
+              assistantContent.unshift({ text: fullText } as ContentBlock);
             }
 
             // Add assistant message to history
@@ -592,4 +576,3 @@ export async function POST(req: NextRequest) {
     return new Response("Internal server error", { status: 500 });
   }
 }
-

@@ -23,10 +23,7 @@ type Message = {
 }
 
 function sanitizeAssistantOutput(text: string) {
-  return text
-    .replace(/<\/sources>/gi, "")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "") // Nova Pro: hide thinking blocks
-    .trim()
+  return text.replace(/<\/sources>/gi, "")
 }
 
 // ---------------- Markdown Renderer ---------------- //
@@ -669,4 +666,3 @@ export default function VendorHistoryPage() {
     </main>
   )
 }
-

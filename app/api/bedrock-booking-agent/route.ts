@@ -27,10 +27,7 @@ const lambda = new LambdaClient({
   },
 });
 
-/** Strip Nova Pro <thinking>...</thinking> blocks so they are not sent to the client */
-function stripThinkingBlocks(text: string): string {
-  return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim()
-}
+
 
 // Helper functions for state tracking
 function extractBookingState(messages: Message[]): any {
@@ -554,18 +551,11 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Strip <thinking>...</thinking> before sending to client and before adding to conversation
-            const textToSend = stripThinkingBlocks(fullText);
-            if (textToSend) {
-              controller.enqueue(encoder.encode(textToSend));
-            }
+
 
             // Add text content first if exists (use stripped text so history has no thinking)
             if (fullText) {
-              const textForHistory = stripThinkingBlocks(fullText);
-              if (textForHistory) {
-                assistantContent.unshift({ text: textForHistory } as ContentBlock);
-              }
+              assistantContent.unshift({ text: fullText } as ContentBlock);
             }
 
             // Add assistant message to history
