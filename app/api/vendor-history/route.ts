@@ -372,9 +372,9 @@ async function handleToolCall(toolName: string, toolInput: any) {
         });
         
         // Build markdown table for trips
-        // Columns: Name, Created Date, Quote #, Subtotal, Total Price, Vendor ID
-        let table = "| Name | Created Date | Quote # | Subtotal | Total Price | Vendor ID |\n";
-        table += "| --- | --- | --- | --- | --- | --- |\n";
+        // Columns: Name, Created Date, Quote #, Total Price, Vendor ID
+        let table = "| Name | Created Date | Quote # | Total Price | Vendor ID |\n";
+        table += "| --- | --- | --- | --- | --- |\n";
         
         parsed.forEach((item: any) => {
           const name = (item.Name || "Unnamed Trip").toString().replace(/\|/g, "\\|");
@@ -382,15 +382,12 @@ async function handleToolCall(toolName: string, toolInput: any) {
             ? new Date(item.CreatedDate).toLocaleDateString()
             : "N/A";
           const quote = item.QuoteNumber ? item.QuoteNumber.toString().replace(/\|/g, "\\|") : "N/A";
-          const subtotal = item.Subtotal !== undefined && item.Subtotal !== null
-            ? `$${Number(item.Subtotal).toFixed(2)}`
-            : "$0.00";
           const total = item.TotalPrice !== undefined && item.TotalPrice !== null
             ? `$${Number(item.TotalPrice).toFixed(2)}`
             : "$0.00";
           const vendorLink = formatVendorLink(item.Vendor_Name__c);
           
-          table += `| ${name} | ${createdDate} | ${quote} | ${subtotal} | ${total} | ${vendorLink} |\n`;
+          table += `| ${name} | ${createdDate} | ${quote} | ${total} | ${vendorLink} |\n`;
         });
         
         // Ensure table ends with proper newline and add summary with clear separation
