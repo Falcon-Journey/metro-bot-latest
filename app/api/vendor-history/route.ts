@@ -81,7 +81,6 @@ KNOWLEDGE BASE DATA STRUCTURE:
 The knowledge base contains JSON records with the following fields:
 - Name: Trip name/description (e.g., "CI - 04/22 - trip to Sacramento, CA")
 - TotalPrice: Total price for the trip
-- Subtotal: Subtotal amount
 - Vendor_Name__c: Vendor ID (may be null)
 - CreatedDate: Date when the record was created
 - QuoteNumber: Quote number
@@ -96,7 +95,7 @@ SEARCH STRATEGIES:
 RESPONSE FORMAT:
 - Be clear and concise
 - When listing trips or pricing results, you MUST present them in a **markdown table** (not as bullet points or plain text)
-- The primary trip table should use columns like: **Trip Name**, **Created Date**, **Quote #**, **Subtotal**, **Total Price**, **Vendor ID**
+- The primary trip table should use columns like: **Trip Name**, **Created Date**, **Quote #**, **Total Price**, **Vendor ID**
 - When calculating totals, show a short text summary *after* the table (e.g., total cost, min/max/average) and, when appropriate, a separate **Vendor Breakdown** section
 - If no results are found, clearly state that and suggest alternative search terms
 
