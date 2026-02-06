@@ -178,16 +178,22 @@ async function queryKnowledgeBase(kbId: string, query: string) {
       const trimmed = text.trim();
 
       // --- CSV handling: detect and parse CSV with header row ---
-      // Header can be either quoted or unquoted
-      const isCsvHeader =
-        trimmed.startsWith("Name,CreatedDate,OpportunityId") ||
-        trimmed.startsWith('"Name","CreatedDate","OpportunityId"');
+      // Detect CSV header by parsing the first line and checking for expected columns,
+      // regardless of column order (supports headers like:
+      // "Name,CreatedDate,...,Subtotal,...,TotalPrice,Vendor_Name__c"
+      // or "CreatedDate,Name,...,Subtotal,...,TotalPrice,Vendor_Name__c").
+      const firstLine = trimmed.split(/\r?\n/)[0] || "";
+      const headerFields = parseCsvLine(firstLine);
+      const hasTripCsvColumns =
+        headerFields.includes("Name") &&
+        headerFields.includes("CreatedDate") &&
+        headerFields.includes("Subtotal") &&
+        headerFields.includes("TotalPrice");
 
-      if (isCsvHeader) {
+      if (hasTripCsvColumns) {
         console.log("📑 Detected CSV format in KB result, parsing as CSV");
         const lines = trimmed.split(/\r?\n/).filter((l) => l.trim().length > 0);
         if (lines.length > 1) {
-          const headerFields = parseCsvLine(lines[0]);
 
           for (let li = 1; li < lines.length; li++) {
             const rowLine = lines[li];
