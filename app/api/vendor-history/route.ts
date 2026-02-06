@@ -210,10 +210,10 @@ async function queryKnowledgeBase(kbId: string, query: string) {
             });
 
             // Normalize numeric fields
-            if (record.Subtotal !== undefined && record.Subtotal !== null && record.Subtotal !== "null") {
-              const n = Number(record.Subtotal);
-              record.Subtotal = isNaN(n) ? record.Subtotal : n;
-            }
+            // if (record.Subtotal !== undefined && record.Subtotal !== null && record.Subtotal !== "null") {
+            //   const n = Number(record.Subtotal);
+            //   record.Subtotal = isNaN(n) ? record.Subtotal : n;
+            // }
             if (record.TotalPrice !== undefined && record.TotalPrice !== null && record.TotalPrice !== "null") {
               const n = Number(record.TotalPrice);
               record.TotalPrice = isNaN(n) ? record.TotalPrice : n;
