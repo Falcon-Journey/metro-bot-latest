@@ -27,8 +27,6 @@ const lambda = new LambdaClient({
   },
 });
 
-
-
 // Helper functions for state tracking
 function extractBookingState(messages: Message[]): any {
   const state: any = {
@@ -482,7 +480,7 @@ export async function POST(req: NextRequest) {
             const systemPrompt = buildSystemPrompt(conversationMessages);
             
             const command = new ConverseStreamCommand({
-              modelId: "amazon.nova-pro-v1:0",
+              modelId: "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
               messages: conversationMessages,
               system: [{ text: systemPrompt }],
               toolConfig: { tools: TOOLS },
@@ -506,11 +504,11 @@ export async function POST(req: NextRequest) {
             let fullText = "";
 
             for await (const event of response.stream) {
-              // Stream text deltas (buffer and strip <thinking> blocks before sending - Nova Pro)
+              // Stream text deltas
               if (event.contentBlockDelta?.delta?.text) {
                 const text = event.contentBlockDelta.delta.text;
                 fullText += text;
-                // Don't enqueue yet - we'll send after stripping thinking
+                controller.enqueue(encoder.encode(text));
               }
 
               // Capture tool use start
@@ -551,9 +549,7 @@ export async function POST(req: NextRequest) {
               }
             }
 
-
-
-            // Add text content first if exists (use stripped text so history has no thinking)
+            // Add text content first if exists
             if (fullText) {
               assistantContent.unshift({ text: fullText } as ContentBlock);
             }
