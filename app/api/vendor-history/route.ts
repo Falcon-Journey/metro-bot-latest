@@ -186,7 +186,7 @@ async function queryKnowledgeBase(kbId: string, query: string) {
       const hasTripCsvColumns =
         headerFields.includes("Name") &&
         headerFields.includes("CreatedDate") &&
-        headerFields.includes("Subtotal") &&
+        // headerFields.includes("Subtotal") &&
         headerFields.includes("TotalPrice");
 
       if (hasTripCsvColumns) {
