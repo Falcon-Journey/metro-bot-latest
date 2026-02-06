@@ -32,75 +32,6 @@ function stripThinkingBlocks(text: string): string {
   return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim()
 }
 
-/** Streaming-aware filter that removes <thinking> blocks incrementally */
-class ThinkingBlockFilter {
-  private buffer: string = "";
-  private inThinkingBlock: boolean = false;
-  private thinkingTagBuffer: string = "";
-
-  processChunk(chunk: string): string {
-    let output = "";
-    let i = 0;
-
-    while (i < chunk.length) {
-      if (!this.inThinkingBlock) {
-        // Look for opening <thinking> tag (case-insensitive)
-        const remaining = chunk.slice(i);
-        const thinkingStartMatch = remaining.match(/^<thinking>/i);
-        
-        if (thinkingStartMatch) {
-          this.inThinkingBlock = true;
-          this.thinkingTagBuffer = "";
-          i += thinkingStartMatch[0].length;
-          continue;
-        }
-        
-        // Check if we might be at the start of a thinking tag
-        const partialMatch = remaining.match(/^<think/i);
-        if (partialMatch) {
-          // Buffer this partial match
-          this.buffer += remaining[0];
-          i++;
-          continue;
-        }
-        
-        // Not in thinking block, output the character
-        if (this.buffer) {
-          output += this.buffer;
-          this.buffer = "";
-        }
-        output += chunk[i];
-        i++;
-      } else {
-        // Inside thinking block - look for closing </thinking> tag
-        const remaining = chunk.slice(i);
-        const thinkingEndMatch = remaining.match(/^<\/thinking>/i);
-        
-        if (thinkingEndMatch) {
-          this.inThinkingBlock = false;
-          this.thinkingTagBuffer = "";
-          i += thinkingEndMatch[0].length;
-          continue;
-        }
-        
-        // Still in thinking block, skip this character
-        this.thinkingTagBuffer += chunk[i];
-        i++;
-      }
-    }
-
-    return output;
-  }
-
-  flush(): string {
-    const result = this.buffer;
-    this.buffer = "";
-    this.thinkingTagBuffer = "";
-    this.inThinkingBlock = false;
-    return result;
-  }
-}
-
 // Helper functions for state tracking
 function extractBookingState(messages: Message[]): any {
   const state: any = {
@@ -576,18 +507,13 @@ export async function POST(req: NextRequest) {
             let currentToolUse: any = null;
             let assistantContent: ContentBlock[] = [];
             let fullText = "";
-            const thinkingFilter = new ThinkingBlockFilter();
 
             for await (const event of response.stream) {
-              // Stream text deltas (filter <thinking> blocks incrementally - Nova Pro)
+              // Stream text deltas (buffer and strip <thinking> blocks before sending - Nova Pro)
               if (event.contentBlockDelta?.delta?.text) {
                 const text = event.contentBlockDelta.delta.text;
                 fullText += text;
-                // Filter and stream immediately for real-time UI
-                const filteredText = thinkingFilter.processChunk(text);
-                if (filteredText) {
-                  controller.enqueue(encoder.encode(filteredText));
-                }
+                // Don't enqueue yet - we'll send after stripping thinking
               }
 
               // Capture tool use start
@@ -628,10 +554,10 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Flush any remaining buffered content and strip any remaining thinking blocks
-            const remainingText = thinkingFilter.flush();
-            if (remainingText) {
-              controller.enqueue(encoder.encode(remainingText));
+            // Strip <thinking>...</thinking> before sending to client and before adding to conversation
+            const textToSend = stripThinkingBlocks(fullText);
+            if (textToSend) {
+              controller.enqueue(encoder.encode(textToSend));
             }
 
             // Add text content first if exists (use stripped text so history has no thinking)
