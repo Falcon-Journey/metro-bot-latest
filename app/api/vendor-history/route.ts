@@ -18,6 +18,11 @@ const bedrock = new BedrockRuntimeClient({
   },
 });
 
+/** Strip Nova Pro <thinking>...</thinking> blocks so they are not sent to the client */
+function stripThinkingBlocks(text: string): string {
+  return text.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "").trim();
+}
+
 // Helper to create a Salesforce vendor link
 function formatVendorLink(vendorId: string | null | undefined): string {
   if (!vendorId || vendorId === "null" || vendorId === "No Vendor Assigned") {
@@ -465,11 +470,11 @@ export async function POST(req: NextRequest) {
             let fullText = "";
 
             for await (const event of response.stream) {
-              // Stream text deltas
+              // Stream text deltas (buffer and strip <thinking> blocks before sending - Nova Pro)
               if (event.contentBlockDelta?.delta?.text) {
                 const text = event.contentBlockDelta.delta.text;
                 fullText += text;
-                controller.enqueue(encoder.encode(text));
+                // Don't enqueue yet - we'll send after stripping thinking
               }
 
               // Capture tool use start
@@ -510,9 +515,18 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Add text content first if exists
+            // Strip <thinking>...</thinking> before sending to client and before adding to conversation
+            const textToSend = stripThinkingBlocks(fullText);
+            if (textToSend) {
+              controller.enqueue(encoder.encode(textToSend));
+            }
+
+            // Add text content first if exists (use stripped text so history has no thinking)
             if (fullText) {
-              assistantContent.unshift({ text: fullText } as ContentBlock);
+              const textForHistory = stripThinkingBlocks(fullText);
+              if (textForHistory) {
+                assistantContent.unshift({ text: textForHistory } as ContentBlock);
+              }
             }
 
             // Add assistant message to history
