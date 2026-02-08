@@ -12,26 +12,25 @@ export function useSpeechRecognition(options: Options = {}) {
   const [supported, setSupported] = useState(false)
   const [listening, setListening] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
   const [interimTranscript, setInterimTranscript] = useState("")
   const [finalTranscript, setFinalTranscript] = useState("")
 
-  const recognitionRef = useRef<any>(null)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
   const finalRef = useRef("")
-  const shouldListenRef = useRef(false)
-  const stoppingRef = useRef(false)
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    const SR: any = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    const SR =
+      (window as unknown as { SpeechRecognition?: new () => SpeechRecognition }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognition }).webkitSpeechRecognition
     if (!SR) {
       setSupported(false)
       return
     }
     setSupported(true)
 
-    const rec = new SR()
-    rec.lang = options.lang || "en-US"
+    const rec = new SR() as SpeechRecognition
+    rec.lang = options.lang ?? "en-US"
     rec.continuous = options.continuous ?? true
     rec.interimResults = options.interimResults ?? true
     rec.maxAlternatives = 1
@@ -43,94 +42,76 @@ export function useSpeechRecognition(options: Options = {}) {
 
     rec.onend = () => {
       setListening(false)
-      if (shouldListenRef.current && !stoppingRef.current) {
-        setTimeout(() => {
-          try {
-            recognitionRef.current?.start?.()
-          } catch (e) {}
-        }, 200)
-      } else {
-        stoppingRef.current = false
-      }
     }
 
-    rec.onerror = (e: any) => {
-      const code = e?.error || "speech_error"
+    rec.onerror = (e: SpeechRecognitionErrorEvent) => {
+      const code = e.error ?? "unknown"
       setError(code)
-      if (shouldListenRef.current && !stoppingRef.current) {
-        setTimeout(() => {
-          try {
-            recognitionRef.current?.start?.()
-          } catch {}
-        }, 300)
-      } else {
-        setListening(false)
-      }
+      setListening(false)
     }
 
-    rec.onresult = (e: any) => {
+    rec.onresult = (e: SpeechRecognitionEvent) => {
       try {
         let interim = ""
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const r = e.results[i]
           const txt = r[0]?.transcript ?? ""
           if (r.isFinal) {
-            finalRef.current += txt
+            finalRef.current += (finalRef.current ? " " : "") + txt
           } else {
             interim += txt
           }
         }
         setFinalTranscript(finalRef.current)
         setInterimTranscript(interim)
-      } catch (err: any) {
-        setError(err?.message || "speech_result_error")
+      } catch {
+        setError("speech_result_error")
       }
     }
 
     recognitionRef.current = rec
     return () => {
       try {
-        recognitionRef.current?.stop?.()
-        recognitionRef.current?.abort?.()
-      } catch {}
+        rec.abort?.()
+      } catch {
+        // ignore
+      }
       recognitionRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [options.lang, options.continuous, options.interimResults])
 
   const start = useCallback(() => {
     const r = recognitionRef.current
     if (!r) return
     setError(null)
-    stoppingRef.current = false
-    shouldListenRef.current = true
     finalRef.current = ""
+    setFinalTranscript("")
+    setInterimTranscript("")
     try {
-      r.lang = options.lang || "en-US"
+      r.lang = options.lang ?? "en-US"
       r.continuous = options.continuous ?? true
       r.interimResults = options.interimResults ?? true
       r.start()
-    } catch (e: any) {}
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "start_failed"
+      setError(msg)
+    }
   }, [options.lang, options.continuous, options.interimResults])
 
   const stop = useCallback(() => {
     const r = recognitionRef.current
     if (!r) return
-    shouldListenRef.current = false
-    stoppingRef.current = true
     try {
       r.stop()
-      r.abort?.()
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [])
 
   const toggle = useCallback(() => {
-    if (shouldListenRef.current) {
-      stop()
-    } else {
-      start()
-    }
-  }, [start, stop])
+    if (listening) stop()
+    else start()
+  }, [listening, start, stop])
 
   const reset = useCallback(() => {
     finalRef.current = ""

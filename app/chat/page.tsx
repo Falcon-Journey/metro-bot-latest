@@ -816,7 +816,7 @@ function ChatInput({
 }) {
   const [text, setText] = useState("")
 
-  const { supported, listening, interimTranscript, finalTranscript, start, stop, reset } =
+  const { supported, listening, error, interimTranscript, finalTranscript, start, stop, reset } =
     useSpeechRecognition({
       lang: "en-US",
       continuous: true,
@@ -824,19 +824,26 @@ function ChatInput({
     })
 
   useEffect(() => {
-    if (!listening) return
     const combined = (finalTranscript + (interimTranscript ? " " + interimTranscript : "")).trim()
     if (combined) setText(combined)
-  }, [listening, interimTranscript, finalTranscript])
+  }, [finalTranscript, interimTranscript])
 
-  useEffect(() => {
-    if (!listening && finalTranscript) {
-      setText(finalTranscript.trim())
-    }
-  }, [listening, finalTranscript])
+  const errorMessage =
+    error === "network"
+      ? "Speech recognition needs internet. Check your connection and try again."
+      : error === "not-allowed" || error === "service-not-allowed"
+        ? "Microphone access was denied. Allow the mic and try again."
+        : error === "no-speech"
+          ? "No speech detected. Tap the mic and speak again."
+          : error
+            ? `Speech error: ${error}. Tap the mic to try again.`
+            : null
 
   return (
     <div className="flex flex-col gap-2">
+      {errorMessage && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">{errorMessage}</p>
+      )}
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Input
